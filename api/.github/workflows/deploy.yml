@@ -13,10 +13,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - name: Debug secrets presence
-        run: |
-          if [ -z "${{ secrets.WIF_PROVIDER }}" ]; then echo "WIF_PROVIDER is EMPTY"; else echo "WIF_PROVIDER is set"; fi
-          if [ -z "${{ secrets.GCP_SA_EMAIL }}" ]; then echo "GCP_SA_EMAIL is EMPTY"; else echo "GCP_SA_EMAIL is set"; fi
+  
       - id: auth
         uses: google-github-actions/auth@v3
         with:
