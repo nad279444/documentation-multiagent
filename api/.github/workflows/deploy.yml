@@ -13,7 +13,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-  
+
       - id: auth
         uses: google-github-actions/auth@v3
         with:
@@ -28,10 +28,10 @@ jobs:
         run: |
           gcloud builds submit --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/documentation-multiagent
 
-      - name: Deploy to Cloud Run
+      - name: Deploy to Cloud Run (build from source)
         run: |
           gcloud run deploy documentation-multiagent \
-            --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/documentation-multiagent \
+            --source . \
             --region us-central1 \
             --platform managed \
             --allow-unauthenticated \
