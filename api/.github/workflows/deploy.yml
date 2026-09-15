@@ -8,12 +8,15 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write   # required to mint the OIDC token for Workload Identity Federation
+      id-token: write # required to mint the OIDC token for Workload Identity Federation
       contents: read
 
     steps:
       - uses: actions/checkout@v4
-
+      - name: Debug secrets presence
+        run: |
+          if [ -z "${{ secrets.WIF_PROVIDER }}" ]; then echo "WIF_PROVIDER is EMPTY"; else echo "WIF_PROVIDER is set"; fi
+          if [ -z "${{ secrets.GCP_SA_EMAIL }}" ]; then echo "GCP_SA_EMAIL is EMPTY"; else echo "GCP_SA_EMAIL is set"; fi
       - id: auth
         uses: google-github-actions/auth@v3
         with:
@@ -22,7 +25,7 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
         with:
-          version: '>= 363.0.0'
+          version: ">= 363.0.0"
 
       - name: Build and push image
         run: |
