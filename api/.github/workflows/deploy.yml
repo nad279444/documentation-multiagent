@@ -29,12 +29,12 @@ jobs:
 
       - name: Build and push image
         run: |
-          gcloud builds submit --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/doc-agent-starter
+          gcloud builds submit --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/documentation-multiagent
 
       - name: Deploy to Cloud Run
         run: |
-          gcloud run deploy doc-agent-starter \
-            --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/doc-agent-starter \
+          gcloud run deploy documentation-multiagent \
+            --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/doc \
             --region us-central1 \
             --platform managed \
             --allow-unauthenticated \
