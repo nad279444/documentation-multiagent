@@ -24,10 +24,6 @@ jobs:
         with:
           version: ">= 363.0.0"
 
-      - name: Build and push image
-        run: |
-          gcloud builds submit --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/documentation-multiagent ./api
-
       - name: Deploy to Cloud Run (build from source)
         run: |
           gcloud run deploy documentation-multiagent \
