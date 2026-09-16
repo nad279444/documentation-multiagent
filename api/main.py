@@ -5,11 +5,11 @@ from fastapi import FastAPI, HTTPException
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 # --- LangChain chat model -----------------------------------------------
 api_key = os.environ.get("OPENAI_API_KEY")
-llm = ChatOpenAI(model="gpt-4o-mini", api_key=api_key) if api_key else None
+llm = ChatOpenAI(model="gpt-4o-mini", api_key=SecretStr(api_key)) if api_key else None
 # Swapping providers later is a one-line change, e.g.:
 # from langchain_anthropic import ChatAnthropic
 # llm = ChatAnthropic(model="claude-...", api_key=...)
@@ -31,7 +31,7 @@ def call_llm_node(state: GraphState) -> GraphState:
             HumanMessage(content=state["input"]),
         ]
     )
-    return {**state, "output": response.content}
+    return {"input": state["input"], "output": str(response.content)}
 
 
 graph_builder = StateGraph(GraphState)
