@@ -11,7 +11,7 @@ service purely for checkpoint state.
 import logging
 from contextlib import contextmanager
 
-from app.config import get_settings
+from config import get_settings
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg_pool import ConnectionPool
 
@@ -112,7 +112,7 @@ def get_checkpointer() -> PostgresSaver:
     """
     global _checkpointer
     if _checkpointer is None:
-        _checkpointer = PostgresSaver(get_pool())
+        _checkpointer = PostgresSaver(conn=get_pool())  # pyright: ignore[reportArgumentType]
     return _checkpointer
 
 
@@ -130,6 +130,8 @@ def upsert_repo(url: str, default_branch: str | None = None) -> int:
             """,
             (url, default_branch),
         ).fetchone()
+        if row is None:
+            raise RuntimeError("Failed to upsert repo")
         return row[0]
 
 
@@ -157,11 +159,13 @@ def record_run(repo_id: int, thread_id: str, doc_type: str, commit_sha: str) -> 
             """,
             (repo_id, thread_id, doc_type, commit_sha),
         ).fetchone()
+        if row is None:
+            raise RuntimeError("Failed to record run")
         return row[0]
 
 
 def complete_run(
-    run_id: int, status: str, output: str | None, eval_report: dict | None
+    run_id: int, status: str, output: str | None, eval_report: dict[str, object] | None
 ) -> None:
     import json
 
@@ -170,3 +174,19 @@ def complete_run(
             "UPDATE doc_runs SET status = %s, output = %s, eval_report = %s WHERE id = %s",
             (status, output, json.dumps(eval_report) if eval_report else None, run_id),
         )
+
+
+def get_cached_run(repo_id: int, doc_type: str) -> dict | None:
+    """Return the most recent completed run for this repo + doc_type, or None."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT id, thread_id, status FROM doc_runs
+            WHERE repo_id = %s AND doc_type = %s AND status IN ('approved', 'needs_human_review')
+            ORDER BY id DESC LIMIT 1
+            """,
+            (repo_id, doc_type),
+        ).fetchone()
+    if not row:
+        return None
+    return {"run_id": row[0], "thread_id": row[1], "status": row[2]}

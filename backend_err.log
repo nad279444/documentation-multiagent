@@ -1,0 +1,9 @@
+INFO:     Will watch for changes in these directories: ['C:\\Users\\bfrimpong\\documentation-multiagent\\api']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [23908] using WatchFiles
+INFO:     Started server process [13084]
+INFO:     Waiting for application startup.
+2026-09-16 15:27:31,049 INFO db: Database schema initialised
+2026-09-16 15:27:31,064 INFO main: Graph compiled with Postgres checkpointing
+INFO:     Application startup complete.
+2026-09-16 15:27:32,901 INFO main: Cache hit: returning existing run 9 for https://github.com/nad279444/Event-Ticketing-System.git [api]

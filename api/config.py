@@ -8,6 +8,10 @@ via --set-secrets; locally they come from a .env file.
 import os
 from functools import lru_cache
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 class Settings:
     # --- LLM / embeddings -------------------------------------------------

@@ -10,10 +10,9 @@ import logging
 import uuid
 from contextlib import asynccontextmanager
 
-from app.config import get_settings
-from app.db import complete_run, get_conn, init_db, record_run, upsert_repo
-from app.graphs.doc_graph import build_graph
-from app.ingest.cloner import IngestError, validate_repo_url
+from db import complete_run, get_cached_run, get_conn, init_db, record_run, upsert_repo
+from graphs.doc_graph import build_graph
+from ingest.cloner import IngestError, validate_repo_url
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
@@ -30,7 +29,7 @@ async def lifespan(app: FastAPI):
     global _graph
     try:
         init_db()
-        from api.db import get_checkpointer
+        from db import get_checkpointer
 
         _graph = build_graph(checkpointer=get_checkpointer())
         logger.info("Graph compiled with Postgres checkpointing")
@@ -54,6 +53,7 @@ class GenerateResponse(BaseModel):
     run_id: int
     thread_id: str
     status: str
+    cached: bool = False
 
 
 @app.get("/health")
@@ -70,6 +70,13 @@ def generate(req: GenerateRequest, background: BackgroundTasks):
         raise HTTPException(status_code=400, detail=str(exc))
 
     repo_id = upsert_repo(clean_url, req.branch)
+
+    # Cache check: if a completed run exists for this repo + doc_type, return it immediately
+    cached = get_cached_run(repo_id, req.doc_type)
+    if cached:
+        logger.info("Cache hit: returning existing run %s for %s [%s]", cached["run_id"], clean_url, req.doc_type)
+        return GenerateResponse(run_id=cached["run_id"], thread_id=cached["thread_id"], status=cached["status"], cached=True)
+
     thread_id = str(uuid.uuid4())
     run_id = record_run(repo_id, thread_id, req.doc_type, commit_sha="")
 
@@ -78,6 +85,9 @@ def generate(req: GenerateRequest, background: BackgroundTasks):
 
 
 def _run_pipeline(run_id: int, thread_id: str, req: GenerateRequest) -> None:
+    if _graph is None:
+        complete_run(run_id, status="error", output=None, eval_report={"error": "Graph not initialized"})
+        return
     try:
         result = _graph.invoke(
             {
@@ -136,3 +146,38 @@ def get_document(run_id: int):
     if not row or not row[0]:
         raise HTTPException(status_code=404, detail="No document available yet")
     return PlainTextResponse(row[0], media_type="text/markdown")
+
+
+# --- Chat endpoint -------------------------------------------------------
+
+class ChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+
+
+class ChatResponseModel(BaseModel):
+    reply: str
+    document: str
+    edited: bool
+
+
+@app.post("/runs/{run_id}/chat", response_model=ChatResponseModel)
+def chat_with_document(run_id: int, req: ChatRequest):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT output FROM doc_runs WHERE id = %s", (run_id,)
+        ).fetchone()
+    if not row or not row[0]:
+        raise HTTPException(status_code=404, detail="No document available yet")
+
+    from agents.chat import chat as agent_chat
+
+    result = agent_chat(user_message=req.message, document=row[0])
+
+    if result.edited:
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE doc_runs SET output = %s WHERE id = %s",
+                (result.document, run_id),
+            )
+
+    return ChatResponseModel(reply=result.reply, document=result.document, edited=result.edited)
