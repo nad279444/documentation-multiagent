@@ -1,54 +1,158 @@
 @import "tailwindcss";
 
+@layer utilities {
+    /* Document paper texture & drop shadow effects */
+    .shadow-document {
+        box-shadow:
+            0 1px 3px 0 rgba(15, 23, 42, 0.05),
+            0 10px 25px -5px rgba(15, 23, 42, 0.08),
+            0 0 1px 1px rgba(15, 23, 42, 0.04);
+    }
+
+    .shadow-folder-tab {
+        box-shadow: 0 -3px 10px rgba(0, 0, 0, 0.03);
+    }
+}
+
+/* Animations */
+@keyframes slideDownFade {
+    from {
+        opacity: 0;
+        transform: translateY(-12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes documentUnfold {
+    from {
+        opacity: 0;
+        transform: translateY(20px) scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes pulseGlow {
+    0%,
+    100% {
+        opacity: 0.4;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.8;
+        transform: scale(1.05);
+    }
+}
+
+.animate-slide-down {
+    animation: slideDownFade 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-document-unfold {
+    animation: documentUnfold 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-pulse-glow {
+    animation: pulseGlow 2.5s ease-in-out infinite;
+}
+
+/* Markdown Styling within paper document */
 .markdown-body pre {
-  background: #1e293b;
-  color: #e2e8f0;
-  padding: 1rem;
-  border-radius: 0.5rem;
-  overflow-x: auto;
+    background: #0f172a;
+    color: #f8fafc;
+    padding: 1.25rem;
+    border-radius: 0.5rem;
+    overflow-x: auto;
+    border: 1px solid #334155;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .markdown-body code {
-  background: #f1f5f9;
-  padding: 0.15rem 0.35rem;
-  border-radius: 0.25rem;
-  font-size: 0.875em;
+    background: #f1f5f9;
+    color: #0f172a;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.25rem;
+    font-size: 0.875em;
+    font-weight: 500;
+    border: 1px solid #e2e8f0;
 }
 
 .markdown-body pre code {
-  background: none;
-  padding: 0;
+    background: transparent;
+    padding: 0;
+    color: inherit;
+    border: none;
 }
 
 .markdown-body table {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 1rem 0;
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1.5rem 0;
+    border-radius: 0.5rem;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .markdown-body th,
 .markdown-body td {
-  border: 1px solid #e2e8f0;
-  padding: 0.5rem 0.75rem;
-  text-align: left;
+    border: 1px solid #e2e8f0;
+    padding: 0.75rem 1rem;
+    text-align: left;
 }
 
 .markdown-body th {
-  background: #f8fafc;
-  font-weight: 600;
+    background: #f8fafc;
+    font-weight: 600;
+    color: #334155;
 }
 
 .markdown-body blockquote {
-  border-left: 4px solid #3b82f6;
-  padding-left: 1rem;
-  margin: 1rem 0;
-  color: #64748b;
+    border-left: 4px solid #0284c7;
+    background: #f0f9ff;
+    padding: 0.75rem 1.25rem;
+    margin: 1.5rem 0;
+    border-radius: 0 0.5rem 0.5rem 0;
+    color: #0369a1;
 }
 
-.markdown-body h1 { font-size: 1.875rem; font-weight: 700; margin: 1.5rem 0 1rem; }
-.markdown-body h2 { font-size: 1.5rem; font-weight: 600; margin: 1.25rem 0 0.75rem; }
-.markdown-body h3 { font-size: 1.25rem; font-weight: 600; margin: 1rem 0 0.5rem; }
+.markdown-body h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #0f172a;
+    margin: 1.75rem 0 1rem;
+    tracking: -0.02em;
+}
+.markdown-body h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #1e293b;
+    margin: 1.5rem 0 0.875rem;
+    border-bottom: 1px solid #f1f5f9;
+    padding-bottom: 0.5rem;
+}
+.markdown-body h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #334155;
+    margin: 1.25rem 0 0.5rem;
+}
 
-.markdown-body p { margin: 0.5rem 0; line-height: 1.75; }
-.markdown-body ul, .markdown-body ol { margin: 0.5rem 0; padding-left: 1.5rem; }
-.markdown-body li { margin: 0.25rem 0; }
+.markdown-body p {
+    margin: 0.75rem 0;
+    line-height: 1.8;
+    color: #334155;
+}
+.markdown-body ul,
+.markdown-body ol {
+    margin: 0.75rem 0;
+    padding-left: 1.75rem;
+    color: #334155;
+}
+.markdown-body li {
+    margin: 0.35rem 0;
+}

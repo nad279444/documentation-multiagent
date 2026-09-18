@@ -25,11 +25,13 @@ BASE_SYSTEM = (
 _llms: dict[str, ChatOpenAI] = {}
 
 
-def get_llm(temperature: float = 0.0, model: str | None = None) -> ChatOpenAI:
+def get_llm(
+    temperature: float = 0.0, model: str | None = None, max_tokens: int | None = None
+) -> ChatOpenAI:
     """Model routing: callers pass a cheap model for narrow, mechanical tasks."""
     settings = get_settings()
     name = model or settings.llm_model
-    key = f"{name}:{temperature}"
+    key = f"{name}:{temperature}:{max_tokens}"
     if key not in _llms:
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is not set")
@@ -39,6 +41,7 @@ def get_llm(temperature: float = 0.0, model: str | None = None) -> ChatOpenAI:
             api_key=SecretStr(settings.openai_api_key),
             timeout=120,
             max_retries=2,
+            max_tokens=max_tokens,
         )
     return _llms[key]
 

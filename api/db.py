@@ -83,7 +83,9 @@ def get_pool() -> ConnectionPool:
             conninfo=settings.database_url,
             min_size=1,
             max_size=5,
-            kwargs={"autocommit": True},
+            kwargs={"autocommit": True, "connect_timeout": 10},
+            check=ConnectionPool.check_connection,
+            reconnect_timeout=5,
             open=True,
         )
     return _pool

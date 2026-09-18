@@ -7,6 +7,7 @@ same shape without the extra infrastructure.
 """
 
 import logging
+import time
 import uuid
 from contextlib import asynccontextmanager
 
@@ -22,6 +23,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 _graph = None
+
+# In-memory chat reply cache: (run_id, message, document) -> (timestamp, response).
+# Repeated identical questions skip the retrieval + LLM round trip entirely.
+_chat_cache: dict[tuple[int, str, str], tuple[float, "ChatResponseModel"]] = {}
+_CHAT_CACHE_MAX = 128
+_CHAT_CACHE_TTL_SECONDS = 600
 
 
 @asynccontextmanager
@@ -164,14 +171,50 @@ class ChatResponseModel(BaseModel):
 def chat_with_document(run_id: int, req: ChatRequest):
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT output FROM doc_runs WHERE id = %s", (run_id,)
+            """
+            SELECT r.output, r.repo_id, repos.last_indexed_sha
+            FROM doc_runs r JOIN repos ON repos.id = r.repo_id
+            WHERE r.id = %s
+            """,
+            (run_id,),
         ).fetchone()
     if not row or not row[0]:
         raise HTTPException(status_code=404, detail="No document available yet")
 
+    document, repo_id, commit_sha = row
+
+    # Cache hit: exact same question on the same document version.
+    now = time.time()
+    cache_key = (run_id, req.message, document)
+    cached = _chat_cache.get(cache_key)
+    if cached and now - cached[0] < _CHAT_CACHE_TTL_SECONDS:
+        logger.info("Chat cache hit for run %s: '%s'", run_id, req.message[:80])
+        return cached[1]
+
+    # Wire the chat into the retrieval pipeline: vector search -> graph
+    # expansion -> rerank. Gives the agent the same grounded source context
+    # the generator uses, so answers can cite [ref:NODE_KEY] chunks.
+    source_context = ""
+    if repo_id and commit_sha:
+        try:
+            from retrieval import retriever
+
+            chunks = retriever.retrieve(repo_id, commit_sha, req.message, top_k=4)
+            source_context = retriever.format_context(chunks)
+        except Exception as exc:
+            logger.warning(
+                "Chat retrieval unavailable (%s); falling back to document only", exc
+            )
+
     from agents.chat import chat as agent_chat
 
-    result = agent_chat(user_message=req.message, document=row[0])
+    result = agent_chat(
+        user_message=req.message, document=document, source_context=source_context
+    )
+
+    response = ChatResponseModel(
+        reply=result.reply, document=result.document, edited=result.edited
+    )
 
     if result.edited:
         with get_conn() as conn:
@@ -180,4 +223,12 @@ def chat_with_document(run_id: int, req: ChatRequest):
                 (result.document, run_id),
             )
 
-    return ChatResponseModel(reply=result.reply, document=result.document, edited=result.edited)
+    # Only cache non-edit replies — an edit changes the document, so the cache
+    # key already covers staleness and the edited doc is persisted above.
+    if not result.edited:
+        _chat_cache[cache_key] = (now, response)
+        if len(_chat_cache) > _CHAT_CACHE_MAX:
+            oldest = min(_chat_cache, key=lambda k: _chat_cache[k][0])
+            del _chat_cache[oldest]
+
+    return response
