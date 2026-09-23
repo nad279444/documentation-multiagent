@@ -202,7 +202,7 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
         {loading && (
           <div className="flex justify-start animate-slide-down">
             <div className="bg-white border border-slate-200 px-4 py-2.5 rounded-2xl text-xs text-slate-500 flex items-center gap-2 shadow-sm rounded-bl-xs">
-              <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-ping" />
+              <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
               <span>Analyzing & drafting response...</span>
             </div>
           </div>

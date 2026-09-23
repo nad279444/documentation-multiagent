@@ -41,6 +41,10 @@ class Settings:
     max_eval_retries: int = int(os.environ.get("MAX_EVAL_RETRIES", "2"))
     retrieval_top_k: int = int(os.environ.get("RETRIEVAL_TOP_K", "8"))
 
+    # --- Google OAuth -------------------------------------------------------
+    google_client_id: str = os.environ.get("GOOGLE_CLIENT_ID", "")
+    google_client_secret: str = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+
 
 @lru_cache
 def get_settings() -> Settings:

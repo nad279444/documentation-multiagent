@@ -22,6 +22,27 @@ _checkpointer: PostgresSaver | None = None
 
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id              BIGSERIAL PRIMARY KEY,
+    google_id       TEXT NOT NULL UNIQUE,
+    email           TEXT NOT NULL UNIQUE,
+    name            TEXT,
+    picture         TEXT,
+    last_login      TIMESTAMPTZ DEFAULT now(),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id              BIGSERIAL PRIMARY KEY,
+    user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    thread_id       TEXT NOT NULL UNIQUE,
+    title           TEXT,
+    last_activity   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON user_sessions(user_id, last_activity DESC);
+
 CREATE TABLE IF NOT EXISTS repos (
     id            BIGSERIAL PRIMARY KEY,
     url           TEXT NOT NULL UNIQUE,
@@ -32,6 +53,7 @@ CREATE TABLE IF NOT EXISTS repos (
 
 CREATE TABLE IF NOT EXISTS doc_runs (
     id          BIGSERIAL PRIMARY KEY,
+    user_id     BIGINT REFERENCES users(id) ON DELETE CASCADE,
     repo_id     BIGINT REFERENCES repos(id) ON DELETE CASCADE,
     thread_id   TEXT NOT NULL,
     doc_type    TEXT NOT NULL,
@@ -41,6 +63,9 @@ CREATE TABLE IF NOT EXISTS doc_runs (
     eval_report JSONB,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Idempotent migration for databases created before user_id was added.
+ALTER TABLE doc_runs ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES users(id) ON DELETE CASCADE;
 
 -- Deterministic call graph (STEP 3). Nodes are functions/classes/modules.
 CREATE TABLE IF NOT EXISTS graph_nodes (
@@ -152,14 +177,16 @@ def get_last_indexed_sha(repo_id: int) -> str | None:
         return row[0] if row else None
 
 
-def record_run(repo_id: int, thread_id: str, doc_type: str, commit_sha: str) -> int:
+def record_run(
+    repo_id: int, user_id: int, thread_id: str, doc_type: str, commit_sha: str
+) -> int:
     with get_conn() as conn:
         row = conn.execute(
             """
-            INSERT INTO doc_runs (repo_id, thread_id, doc_type, commit_sha)
-            VALUES (%s, %s, %s, %s) RETURNING id
+            INSERT INTO doc_runs (repo_id, user_id, thread_id, doc_type, commit_sha)
+            VALUES (%s, %s, %s, %s, %s) RETURNING id
             """,
-            (repo_id, thread_id, doc_type, commit_sha),
+            (repo_id, user_id, thread_id, doc_type, commit_sha),
         ).fetchone()
         if row is None:
             raise RuntimeError("Failed to record run")
@@ -178,17 +205,99 @@ def complete_run(
         )
 
 
-def get_cached_run(repo_id: int, doc_type: str) -> dict | None:
+def get_cached_run(repo_id: int, user_id: int, doc_type: str) -> dict | None:
     """Return the most recent completed run for this repo + doc_type, or None."""
     with get_conn() as conn:
         row = conn.execute(
             """
             SELECT id, thread_id, status FROM doc_runs
-            WHERE repo_id = %s AND doc_type = %s AND status IN ('approved', 'needs_human_review')
+            WHERE repo_id = %s AND user_id = %s AND doc_type = %s AND status IN ('approved', 'needs_human_review')
             ORDER BY id DESC LIMIT 1
             """,
-            (repo_id, doc_type),
+            (repo_id, user_id, doc_type),
         ).fetchone()
     if not row:
         return None
     return {"run_id": row[0], "thread_id": row[1], "status": row[2]}
+
+
+def get_or_create_user(google_id: str, email: str, name: str = "", picture: str = "") -> int:
+    """Upsert a user from Google OAuth."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO users (google_id, email, name, picture)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (google_id) DO UPDATE
+                SET last_login = now(),
+                    email = EXCLUDED.email,
+                    name = COALESCE(EXCLUDED.name, users.name),
+                    picture = COALESCE(EXCLUDED.picture, users.picture)
+            RETURNING id
+            """,
+            (google_id, email, name, picture),
+        ).fetchone()
+        return row[0]
+
+
+def get_user_by_id(user_id: int) -> dict | None:
+    """Get user info by ID."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, email, name, picture, created_at FROM users WHERE id = %s",
+            (user_id,),
+        ).fetchone()
+    if row:
+        return {
+            "id": row[0],
+            "email": row[1],
+            "name": row[2],
+            "picture": row[3],
+            "created_at": row[4],
+        }
+    return None
+
+
+def create_session(user_id: int, thread_id: str, title: str = "") -> int:
+    """Create a conversation session for a user."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO user_sessions (user_id, thread_id, title)
+            VALUES (%s, %s, %s) RETURNING id
+            """,
+            (user_id, thread_id, title or "Untitled"),
+        ).fetchone()
+        return row[0]
+
+
+def get_user_sessions(user_id: int, limit: int = 20) -> list[dict]:
+    """Get user's recent sessions."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, thread_id, title, last_activity, created_at
+            FROM user_sessions WHERE user_id = %s
+            ORDER BY last_activity DESC LIMIT %s
+            """,
+            (user_id, limit),
+        ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "thread_id": r[1],
+            "title": r[2],
+            "last_activity": r[3],
+            "created_at": r[4],
+        }
+        for r in rows
+    ]
+
+
+def update_session_activity(user_id: int, thread_id: str) -> None:
+    """Update last_activity for a session."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE user_sessions SET last_activity = now() WHERE user_id = %s AND thread_id = %s",
+            (user_id, thread_id),
+        )

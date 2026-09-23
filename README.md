@@ -1,29 +1,109 @@
-# Doc Agent Starter
+# DocAgent
 
-Minimal FastAPI + LangGraph app for generating documentation from a GitHub repo.
+DocAgent is a multi-agent documentation generator. Paste a public GitHub
+repository URL, and a LangGraph pipeline clones the repo, parses it into a
+code graph, indexes it for retrieval, generates API or architecture
+documentation with an LLM, and automatically evaluates the result — revising
+it until it passes or escalating it for human review.
+
+## Repo layout
+
+```
+api/                  FastAPI backend
+  main.py             HTTP entrypoint (auth, generate, runs, chat)
+  auth.py             Google OAuth ID-token verification
+  config.py           All settings from API/.env / Cloud Run secrets
+  db.py               Postgres (Neon): app data + LangGraph checkpoints
+  agents/             LLM agents: api_docs, architecture, evaluator, chat
+  graphs/             doc_graph.py — the LangGraph state machine
+  ingest/             cloner (guardrails), parser, graph_store (call graph)
+  retrieval/          embeddings (OpenAI -> Pinecone), retriever (rerank)
+client/               React 19 + Vite + Tailwind 4 frontend
+  src/components/     GoogleSignIn, SubmitForm, DocumentViewer, ChatPanel
+  src/lib/            api.ts (fetch helpers), auth.ts (token handling)
+.github/workflows/    Cloud Run deploy via Workload Identity Federation
+```
+
+## How it works
+
+The `POST /generate` endpoint enqueues a run and returns a `run_id`
+immediately; generation runs in the background through a LangGraph state
+machine (`api/graphs/doc_graph.py`):
+
+```
+ingest -> generate -> evaluate -> [publish | generate (revise) | human_review]
+```
+
+1. **Ingest** — shallow-clones a public GitHub repo with guardrails applied at
+   the door: only `github.com` URLs, size/file caps, and files matching
+   credential patterns are excluded from indexing entirely. Changed files are
+   re-indexed incrementally rather than re-cloning everything.
+2. **Parse & graph** — code is parsed into function/class/module nodes and a
+   deterministic call graph persisted in Postgres (`graph_nodes` /
+   `graph_edges`).
+3. **Embed** — chunks are embedded with OpenAI and upserted to Pinecone for
+   vector search.
+4. **Retrieve** — graph-augmented retrieval: vector search finds semantic
+   seeds, the call graph expands to their callers/callees, and a Cohere
+   reranker narrows the pool. Falls back to vector ordering without a Cohere
+   key.
+5. **Generate** — an LLM writes API reference or architecture docs (Mermaid
+   diagrams included) grounded in the retrieved chunks, citing every claim as
+   `[ref:NODE_KEY]`.
+6. **Evaluate** — deterministic checks run first (citations resolve, all
+   endpoints covered, schema well-formed, no secrets leaked); an LLM judge
+   only runs once those pass, and only for fuzzy criteria (clarity,
+   redundancy). Failed docs are regenerated with feedback, up to
+   `MAX_EVAL_RETRIES`; beyond that they're kept and flagged
+   `needs_human_review`, never discarded.
+7. **Chat** — for an existing run you can ask questions or request edits. A
+   tool-calling agent edits the document (updates persisted) with guardrails
+   keeping the conversation on-topic, and an in-memory cache dedupes repeated
+   questions.
+
+## Prerequisites
+
+- Python 3.11+ and `git`
+- Node.js 18+ (for the frontend)
+- Accounts/keys: OpenAI, Neon Postgres, Pinecone, Google OAuth; optionally
+  Cohere for reranking
 
 ## Start the API
 
-The API is a FastAPI app in `api/main.py`. Use an isolated Python environment, then run Uvicorn from inside `api`:
+The API is a FastAPI app in `api/main.py`. Use an isolated Python environment,
+then run Uvicorn from inside `api`:
 
 ```bash
 cd api
 python -m venv .venv
-. .venv/bin/activate
+# Windows (PowerShell):  .\.venv\Scripts\Activate.ps1
+# macOS/Linux:           source .venv/bin/activate
 python -m pip install -r requirements.txt
 python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-If you see `No module named uvicorn`, your shell is using a Python environment where the API dependencies have not been installed yet. Activate the virtual environment or run `python -m pip install -r requirements.txt` in the environment you are using.
+> If you see `No module named uvicorn`, your shell is using a Python
+> environment where the API dependencies are not installed. Activate the
+> virtual environment (or call its interpreter directly, e.g.
+> `./.venv/Scripts/python.exe -m uvicorn ...` on Windows) and reinstall.
 
-The API loads local settings from `api/.env`. At minimum, real generation needs:
+The API loads local settings from `api/.env`:
 
-```text
+```dotenv
 OPENAI_API_KEY=sk-...
-DATABASE_URL=postgresql://...
+DATABASE_URL=postgresql://...        # Neon Postgres (app data + checkpoints)
+PINECONE_API_KEY=...                 # vector store
+PINECONE_INDEX=doc-agent
+PINECONE_CLOUD=aws
+PINECONE_REGION=us-east-1
+GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=...
+COHERE_API_KEY=...                   # optional reranker (skipped if unset)
 ```
 
-Optional services such as Pinecone and Cohere are also read from `api/.env` when configured.
+Optional tunables: `LLM_MODEL` (default `gpt-4o-mini`), `EMBEDDING_MODEL`
+(default `text-embedding-3-small`), `MAX_REPO_MB` (200), `MAX_FILES` (2000),
+`MAX_EVAL_RETRIES` (2), `RETRIEVAL_TOP_K` (8).
 
 ## Start with Docker
 
@@ -36,22 +116,6 @@ docker run --env-file api/.env -p 8000:8080 doc-agent-api
 
 The container listens on `$PORT`, defaulting to `8080`.
 
-## Test the API
-
-Health check:
-
-```bash
-curl http://localhost:8000/health
-```
-
-Submit a documentation run:
-
-```bash
-curl -X POST http://localhost:8000/generate \
-  -H "Content-Type: application/json" \
-  -d '{"repo_url":"https://github.com/tiangolo/fastapi","doc_type":"api"}'
-```
-
 ## Frontend
 
 In a second terminal:
@@ -59,31 +123,49 @@ In a second terminal:
 ```bash
 cd client
 npm install
+cp .env.example .env 2>/dev/null # VITE_API_URL + VITE_GOOGLE_CLIENT_ID
 npm run dev
 ```
 
-The Vite app runs on `http://localhost:3000` and proxies `/api` requests to the FastAPI server on port 8000.
+The Vite app runs on `http://localhost:3000` and proxies `/api` requests to
+the FastAPI server on port 8000. Signing in requires the OAuth client's
+**Authorized JavaScript origin** to include `http://localhost:3000`.
 
-## Required GitHub secrets for deploy
+## API endpoints
 
-Set these under Settings -> Secrets and variables -> Actions:
+| Method | Path                       | Description                                  |
+| ------ | -------------------------- | -------------------------------------------- |
+| GET    | `/health`                  | Health check                                 |
+| POST   | `/auth/verify`             | Verify Google ID token, return user + sessions |
+| POST   | `/generate`                | Start a documentation run (`repo_url`, `doc_type`, `branch?`) |
+| GET    | `/runs/{run_id}`           | Run status + output (owner-only)             |
+| GET    | `/runs/{run_id}/document`  | Plain-text markdown of the generated doc     |
+| POST   | `/runs/{run_id}/chat`      | Ask about / request edits to a document      |
+| GET    | `/sessions`                | List the user's recent sessions              |
 
-- `WIF_PROVIDER` - full resource name of your Workload Identity Provider, for example `projects/123456789/locations/global/workloadIdentityPools/github-pool/providers/github-provider`
-- `GCP_SA_EMAIL` - the service account email the workflow impersonates
-- `GCP_PROJECT_ID` - your GCP project ID
+Most endpoints require `Authorization: Bearer <google_id_token>`.
 
-## Required GCP Secret Manager secret
-
-The deploy step injects `OPENAI_API_KEY` into Cloud Run from Secret Manager rather than as a plain env var. Create it once:
+## Test the API
 
 ```bash
-echo -n "sk-your-key" | gcloud secrets create OPENAI_API_KEY --data-file=-
+curl http://localhost:8000/health
 ```
 
-Grant your Cloud Run service account access to read it:
+## Deploy to Cloud Run
 
-```bash
-gcloud secrets add-iam-policy-binding OPENAI_API_KEY \
-  --member="serviceAccount:YOUR_RUNTIME_SA@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
-```
+Pushing to `main` triggers `.github/workflows/deploy.yml`, which builds the
+API from source and deploys to Cloud Run using Workload Identity Federation.
+
+Required repo secrets (Settings → Secrets and variables → Actions):
+
+- `WIF_PROVIDER` — Workload Identity Provider resource name, e.g.
+  `projects/123456789/locations/global/workloadIdentityPools/github-pool/providers/github-provider`
+- `GCP_SA_EMAIL` — the service account the workflow impersonates
+- `GCP_PROJECT_ID` — your GCP project ID
+
+Secrets are injected at runtime from Secret Manager rather than plain env
+vars. Create each once (`` `echo -n "value" | gcloud secrets create NAME --data-file=-` ``)
+and grant the runtime service account `roles/secretmanager.secretAccessor`:
+
+- `OPENAI_API_KEY`, `DATABASE_URL`, `PINECONE_API_KEY`, `COHERE_API_KEY`,
+  `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`

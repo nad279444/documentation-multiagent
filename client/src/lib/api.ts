@@ -1,4 +1,11 @@
+import { getToken } from './auth';
+
 const BASE = '/api';
+
+function authHeaders(): HeadersInit {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 export interface GenerateRequest {
   repo_url: string;
@@ -26,7 +33,7 @@ export interface RunStatus {
 export async function submitGeneration(req: GenerateRequest): Promise<GenerateResponse> {
   const res = await fetch(`${BASE}/generate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(req),
   });
   if (!res.ok) {
@@ -37,13 +44,15 @@ export async function submitGeneration(req: GenerateRequest): Promise<GenerateRe
 }
 
 export async function getRun(runId: number): Promise<RunStatus> {
-  const res = await fetch(`${BASE}/runs/${runId}`);
+  const res = await fetch(`${BASE}/runs/${runId}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Run not found');
   return res.json();
 }
 
 export async function getDocument(runId: number): Promise<string> {
-  const res = await fetch(`${BASE}/runs/${runId}/document`);
+  const res = await fetch(`${BASE}/runs/${runId}/document`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error('Document not available');
   return res.text();
 }

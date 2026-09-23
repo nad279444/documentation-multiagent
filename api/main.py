@@ -11,10 +11,20 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-from db import complete_run, get_cached_run, get_conn, init_db, record_run, upsert_repo
+from auth import get_current_user
+from db import (
+    complete_run,
+    create_session,
+    get_cached_run,
+    get_conn,
+    get_user_sessions,
+    init_db,
+    record_run,
+    upsert_repo,
+)
 from graphs.doc_graph import build_graph
 from ingest.cloner import IngestError, validate_repo_url
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 logging.basicConfig(
@@ -63,13 +73,38 @@ class GenerateResponse(BaseModel):
     cached: bool = False
 
 
+class AuthResponse(BaseModel):
+    user_id: int
+    email: str
+    name: str
+    picture: str
+    sessions: list[dict]
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 
+@app.post("/auth/verify", response_model=AuthResponse)
+async def verify_auth(user: dict = Depends(get_current_user)):
+    """Verify token and return user info + sessions."""
+    sessions = get_user_sessions(user["id"], limit=20)
+    return AuthResponse(
+        user_id=user["id"],
+        email=user["email"],
+        name=user["name"],
+        picture=user["picture"],
+        sessions=sessions,
+    )
+
+
 @app.post("/generate", response_model=GenerateResponse)
-def generate(req: GenerateRequest, background: BackgroundTasks):
+def generate(
+    req: GenerateRequest,
+    background: BackgroundTasks,
+    user: dict = Depends(get_current_user),  # Require auth
+):
     # Input guardrail: reject bad URLs before any work is queued.
     try:
         clean_url = validate_repo_url(req.repo_url)
@@ -79,13 +114,21 @@ def generate(req: GenerateRequest, background: BackgroundTasks):
     repo_id = upsert_repo(clean_url, req.branch)
 
     # Cache check: if a completed run exists for this repo + doc_type, return it immediately
-    cached = get_cached_run(repo_id, req.doc_type)
+    cached = get_cached_run(repo_id, user["id"], req.doc_type)
     if cached:
         logger.info("Cache hit: returning existing run %s for %s [%s]", cached["run_id"], clean_url, req.doc_type)
         return GenerateResponse(run_id=cached["run_id"], thread_id=cached["thread_id"], status=cached["status"], cached=True)
 
     thread_id = str(uuid.uuid4())
-    run_id = record_run(repo_id, thread_id, req.doc_type, commit_sha="")
+
+    # Create session for this conversation
+    create_session(
+        user["id"],
+        thread_id,
+        title=f"{req.doc_type.title()} - {clean_url.split('/')[-1]}",
+    )
+
+    run_id = record_run(repo_id, user["id"], thread_id, req.doc_type, commit_sha="")
 
     background.add_task(_run_pipeline, run_id, thread_id, req)
     return GenerateResponse(run_id=run_id, thread_id=thread_id, status="queued")
@@ -120,14 +163,16 @@ def _run_pipeline(run_id: int, thread_id: str, req: GenerateRequest) -> None:
 
 
 @app.get("/runs/{run_id}")
-def get_run(run_id: int):
+def get_run(run_id: int, user: dict = Depends(get_current_user)):
+    """Get run (only accessible by owner)."""
     with get_conn() as conn:
         row = conn.execute(
             """
             SELECT r.id, r.status, r.doc_type, r.commit_sha, r.output, r.eval_report, repos.url
-            FROM doc_runs r JOIN repos ON repos.id = r.repo_id WHERE r.id = %s
+            FROM doc_runs r JOIN repos ON repos.id = r.repo_id
+            WHERE r.id = %s AND r.user_id = %s
             """,
-            (run_id,),
+            (run_id, user["id"]),
         ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -140,6 +185,13 @@ def get_run(run_id: int):
         "eval_report": row[5],
         "repo_url": row[6],
     }
+
+
+@app.get("/sessions")
+def list_sessions(user: dict = Depends(get_current_user)):
+    """List user's sessions."""
+    sessions = get_user_sessions(user["id"], limit=50)
+    return {"sessions": sessions}
 
 
 @app.get("/runs/{run_id}/document", response_model=None)
