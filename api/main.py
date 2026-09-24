@@ -30,11 +30,11 @@ from db import (
     record_run,
     upsert_repo,
 )
-from graphs.doc_graph import build_graph
-from ingest.cloner import IngestError, validate_repo_url
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from graphs.doc_graph import build_graph
+from ingest.cloner import IngestError, validate_repo_url
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
@@ -54,7 +54,7 @@ _CHAT_CACHE_TTL_SECONDS = 600
 # Per-run SSE event buffers. The background pipeline writes stage/token/done
 # events here and GET /runs/{id}/stream reads them, so the frontend sees
 # progress live instead of waiting for the run to finish.
-_HB = object()   # heartbeat sentinel
+_HB = object()  # heartbeat sentinel
 _EOS = object()  # end-of-stream sentinel
 
 
@@ -142,7 +142,7 @@ app = FastAPI(title="Documentation Agent", lifespan=lifespan)
 origins = [
     "http://localhost:5173",  # local dev (Vite)
     "http://localhost:3000",  # alternative dev
-    "https://your-vercel-domain.vercel.app",  # production — replace with your domain
+    "https://documentation-multiagent-qnzpfn7mea-uc.a.run.app/",  # production — replace with your domain
 ]
 
 app.add_middleware(
@@ -210,8 +210,18 @@ def generate(
     # Cache check: if a completed run exists for this repo + doc_type, return it immediately
     cached = get_cached_run(repo_id, user["id"], req.doc_type)
     if cached:
-        logger.info("Cache hit: returning existing run %s for %s [%s]", cached["run_id"], clean_url, req.doc_type)
-        return GenerateResponse(run_id=cached["run_id"], thread_id=cached["thread_id"], status=cached["status"], cached=True)
+        logger.info(
+            "Cache hit: returning existing run %s for %s [%s]",
+            cached["run_id"],
+            clean_url,
+            req.doc_type,
+        )
+        return GenerateResponse(
+            run_id=cached["run_id"],
+            thread_id=cached["thread_id"],
+            status=cached["status"],
+            cached=True,
+        )
 
     thread_id = str(uuid.uuid4())
 
@@ -231,7 +241,12 @@ def generate(
 def _run_pipeline(run_id: int, thread_id: str, req: GenerateRequest) -> None:
     buffer = _buffer_for(run_id)
     if _graph is None:
-        complete_run(run_id, status="error", output=None, eval_report={"error": "Graph not initialized"})
+        complete_run(
+            run_id,
+            status="error",
+            output=None,
+            eval_report={"error": "Graph not initialized"},
+        )
         buffer.push({"type": "error", "error": "Graph not initialized"})
         buffer.close()
         return
@@ -419,6 +434,7 @@ def get_document(run_id: int):
 
 
 # --- Chat endpoint -------------------------------------------------------
+
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
