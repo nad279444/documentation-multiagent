@@ -37,4 +37,5 @@ jobs:
             --set-secrets COHERE_API_KEY=COHERE_API_KEY:latest \
             --set-secrets GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest \
             --set-secrets GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest \
-            --set-env-vars PINECONE_INDEX=doc-agent,LLM_MODEL=gpt-4o-mini,EMBEDDING_MODEL=text-embedding-3-small,MAX_EVAL_RETRIES=2,RETRIEVAL_TOP_K=8
+            --set-secrets LANGSMITH_API_KEY=LANGSMITH_API_KEY:latest \
+            --set-env-vars PINECONE_INDEX=doc-agent,LLM_MODEL=gpt-4o-mini,EMBEDDING_MODEL=text-embedding-3-small,MAX_EVAL_RETRIES=2,RETRIEVAL_TOP_K=8,LANGSMITH_PROJECT=doc-agent,LANGSMITH_TRACING=true,LANGSMITH_ENDPOINT=https://api.smith.langchain.com

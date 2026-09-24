@@ -207,4 +207,4 @@ vars. Create each once (`` `echo -n "value" | gcloud secrets create NAME --data-
 and grant the runtime service account `roles/secretmanager.secretAccessor`:
 
 - `OPENAI_API_KEY`, `DATABASE_URL`, `PINECONE_API_KEY`, `COHERE_API_KEY`,
-  `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+  `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `LANGSMITH_API_KEY`

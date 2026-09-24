@@ -33,6 +33,7 @@ from db import (
 from graphs.doc_graph import build_graph
 from ingest.cloner import IngestError, validate_repo_url
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
@@ -136,6 +137,21 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Documentation Agent", lifespan=lifespan)
+
+# CORS: the frontend runs on a separate origin in dev (Vite) and production.
+origins = [
+    "http://localhost:5173",  # local dev (Vite)
+    "http://localhost:3000",  # alternative dev
+    "https://your-vercel-domain.vercel.app",  # production — replace with your domain
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class GenerateRequest(BaseModel):
