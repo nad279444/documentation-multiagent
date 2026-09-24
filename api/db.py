@@ -95,6 +95,34 @@ CREATE TABLE IF NOT EXISTS graph_edges (
 CREATE INDEX IF NOT EXISTS idx_nodes_repo_sha ON graph_nodes (repo_id, commit_sha);
 CREATE INDEX IF NOT EXISTS idx_edges_src ON graph_edges (repo_id, commit_sha, src_key);
 CREATE INDEX IF NOT EXISTS idx_edges_dst ON graph_edges (repo_id, commit_sha, dst_key);
+
+-- Persisted chat history shared across all runs of a repo (user + repo), so
+-- switching between the API Reference and Architecture tabs shows the same
+-- conversation and clearing deletes the entire thread.
+--
+-- Migration: an earlier local-only draft keyed messages per-run; drop it if
+-- present so the workspace-keyed shape below is created instead.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'chat_messages' AND column_name = 'run_id'
+    ) THEN
+        DROP TABLE chat_messages;
+    END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    repo_id     BIGINT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    role        TEXT NOT NULL,          -- user | assistant
+    content     TEXT NOT NULL,
+    edited      BOOLEAN NOT NULL DEFAULT FALSE,  -- assistant reply updated the doc
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_workspace ON chat_messages(user_id, repo_id, id);
 """
 
 
@@ -193,6 +221,21 @@ def record_run(
         return row[0]
 
 
+def _json_report_default(obj: object) -> object:
+    """Make any stray eval payload JSON-safe instead of failing the run.
+
+    Sets/tuples (e.g. a bogus-citation set leaking out of a check) become
+    lists; anything else falls back to its string form so complete_run can
+    never blow up on an unserializable object.
+    """
+    if isinstance(obj, (set, tuple, frozenset)):
+        return list(obj)
+    try:
+        return str(obj)
+    except Exception:
+        return f"<{type(obj).__name__}>"
+
+
 def complete_run(
     run_id: int, status: str, output: str | None, eval_report: dict[str, object] | None
 ) -> None:
@@ -201,7 +244,14 @@ def complete_run(
     with get_conn() as conn:
         conn.execute(
             "UPDATE doc_runs SET status = %s, output = %s, eval_report = %s WHERE id = %s",
-            (status, output, json.dumps(eval_report) if eval_report else None, run_id),
+            (
+                status,
+                output,
+                json.dumps(eval_report, default=_json_report_default)
+                if eval_report
+                else None,
+                run_id,
+            ),
         )
 
 
@@ -300,4 +350,64 @@ def update_session_activity(user_id: int, thread_id: str) -> None:
         conn.execute(
             "UPDATE user_sessions SET last_activity = now() WHERE user_id = %s AND thread_id = %s",
             (user_id, thread_id),
+        )
+
+
+def get_recent_runs(user_id: int) -> list[dict]:
+    """Latest completed run per doc_type, with the generated document.
+
+    What the UI restores after a logout/login so the user lands back on their
+    last document instead of a fresh submission form.
+    """
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT ON (r.doc_type) r.id, r.doc_type, r.status, r.output, repos.url
+            FROM doc_runs r JOIN repos ON repos.id = r.repo_id
+            WHERE r.user_id = %s AND r.output IS NOT NULL AND r.status <> 'error'
+            ORDER BY r.doc_type, r.id DESC
+            """,
+            (user_id,),
+        ).fetchall()
+    return [
+        {
+            "run_id": r[0],
+            "doc_type": r[1],
+            "status": r[2],
+            "output": r[3],
+            "repo_url": r[4],
+        }
+        for r in rows
+    ]
+
+
+def append_chat_message(
+    user_id: int, repo_id: int, role: str, content: str, edited: bool = False
+) -> None:
+    """Persist one chat message for a user's repo workspace."""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO chat_messages (user_id, repo_id, role, content, edited) VALUES (%s, %s, %s, %s, %s)",
+            (user_id, repo_id, role, content, edited),
+        )
+
+
+def get_chat_messages(user_id: int, repo_id: int) -> list[dict]:
+    """Full persisted conversation for a workspace, oldest first."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT role, content, edited FROM chat_messages WHERE user_id = %s AND repo_id = %s ORDER BY id",
+            (user_id, repo_id),
+        ).fetchall()
+    return [
+        {"role": r[0], "content": r[1], "edited": r[2]} for r in rows
+    ]
+
+
+def clear_chat_messages(user_id: int, repo_id: int) -> None:
+    """Delete the entire conversation thread for a workspace."""
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM chat_messages WHERE user_id = %s AND repo_id = %s",
+            (user_id, repo_id),
         )

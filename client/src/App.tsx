@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getRun, submitGeneration } from "./lib/api";
+import { getRecentRuns, getRun, streamRun, submitGeneration } from "./lib/api";
 import { clearToken, getCurrentUser, getToken } from "./lib/auth";
 import SubmitForm from "./components/SubmitForm";
 import DocumentViewer from "./components/DocumentViewer";
 import ChatPanel from "./components/ChatPanel";
 import GoogleSignIn from "./components/GoogleSignIn";
 import heroImage from "./assets/hero.png";
-import html2canvas from "html2canvas";
+import { toPng } from "html-to-image";
 import jsPDF from "jspdf";
 
 type DocType = "api" | "architecture";
@@ -36,9 +36,23 @@ export default function App() {
   const [activeDoc, setActiveDoc] = useState<DocType>("api");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
+const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Live draft assembled from streamed tokens while a run is polled.
+  const [liveDraft, setLiveDraft] = useState<Record<DocType, string>>({
+    api: "",
+    architecture: "",
+  });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamCancelsRef = useRef<Array<() => void>>([]);
+  const pendingTokensRef = useRef<Record<DocType, string>>({
+    api: "",
+    architecture: "",
+  });
+  const liveDraftRef = useRef<Record<DocType, string>>({
+    api: "",
+    architecture: "",
+  });
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -47,9 +61,67 @@ export default function App() {
     }
   }, []);
 
+  const stopStreaming = useCallback(() => {
+    streamCancelsRef.current.forEach((cancel) => cancel());
+    streamCancelsRef.current = [];
+    pendingTokensRef.current = { api: "", architecture: "" };
+    liveDraftRef.current = { api: "", architecture: "" };
+  }, []);
+
+  const STREAM_TICK_MS = 70;
+const STREAM_CHARS_PER_TICK = 14; // ~200 chars/sec typewriter pace
+
+  // Throttle token flushes so the draft visibly types out instead of appearing
+  // instantly. Tokens accumulate in a ref and leak out at a capped rate.
   useEffect(() => {
-    return () => stopPolling();
-  }, [stopPolling]);
+    if (phase !== "polling") return;
+    const flush = setInterval(() => {
+      let changed = false;
+      (Object.keys(pendingTokensRef.current) as DocType[]).forEach((key) => {
+        const pend = pendingTokensRef.current[key];
+        if (!pend) return;
+        const take = pend.slice(0, STREAM_CHARS_PER_TICK);
+        pendingTokensRef.current[key] = pend.slice(take.length);
+        if (take) {
+          liveDraftRef.current[key] += take;
+          changed = true;
+        }
+      });
+      if (changed) setLiveDraft({ ...liveDraftRef.current });
+    }, STREAM_TICK_MS);
+    return () => clearInterval(flush);
+  }, [phase]);
+
+  useEffect(() => {
+    return () => {
+      stopPolling();
+      stopStreaming();
+    };
+  }, [stopPolling, stopStreaming]);
+
+// Restore the last generated documents (one per doc type) so a logout/login
+  // continues where the user left off instead of starting a fresh submission.
+  const restoreRecent = useCallback(async () => {
+    try {
+      const recent = await getRecentRuns();
+      const restored: DocRun[] = recent.map((r) => ({
+        docType: r.doc_type,
+        runId: r.run_id,
+        status: r.status,
+        document: r.output ?? "",
+        cacheHit: false,
+      }));
+      if (restored.length) {
+        setRuns(restored);
+        setActiveDoc(restored[0].docType);
+        setPhase("view");
+        return true;
+      }
+    } catch {
+      /* token invalid or no server — fall through to submit page */
+    }
+    return false;
+  }, []);
 
   // Check if already logged in on mount
   useEffect(() => {
@@ -59,6 +131,10 @@ export default function App() {
         try {
           const userInfo = await getCurrentUser();
           setUser(userInfo);
+          if (await restoreRecent()) {
+            setLoading(false);
+            return;
+          }
           setPhase("submit");
         } catch (_e) {
           // Token invalid or expired
@@ -70,16 +146,18 @@ export default function App() {
     };
 
     checkAuth();
-  }, []);
+  }, [restoreRecent]);
 
-  const handleLoginSuccess = (userInfo: any) => {
+  const handleLoginSuccess = async (userInfo: any) => {
     setUser(userInfo);
+    if (await restoreRecent()) return;
     setPhase("submit");
   };
 
-  const handleLogout = () => {
+const handleLogout = () => {
     clearToken();
     stopPolling();
+    stopStreaming();
     setUser(null);
     setPhase("login");
   };
@@ -119,11 +197,14 @@ export default function App() {
         }),
       );
 
-      setRuns(results);
+setRuns(results);
       setActiveDoc(docTypes[0]);
+      setLiveDraft({ api: "", architecture: "" });
 
-      if (results.some((r) => r.status === "queued")) {
+      const queued = results.filter((r) => r.status === "queued");
+      if (queued.length) {
         setPhase("polling");
+        startStreaming(queued);
         startPolling();
       } else {
         refreshFinished(results);
@@ -133,6 +214,27 @@ export default function App() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const startStreaming = (queued: DocRun[]) => {
+    streamCancelsRef.current.forEach((cancel) => cancel());
+    streamCancelsRef.current = [];
+    streamCancelsRef.current = queued.map((r) =>
+      streamRun(r.runId, {
+        onStage: (stage) => setStatus(stage),
+        onToken: (text) => {
+          pendingTokensRef.current[r.docType] += text;
+        },
+        onDone: () => {
+          // Pull the authoritative final document now instead of waiting for
+          // the next poll tick.
+          void refreshFinished(runsRef.current);
+        },
+        onError: () => {
+          /* polling is the fallback; leave it running */
+        },
+      }),
+    );
   };
 
   const refreshFinished = async (current: DocRun[]) => {
@@ -220,63 +322,89 @@ export default function App() {
     }
   };
 
-  const handleDownload = async () => {
+const handleDownload = async () => {
     const el = window.document.getElementById("document-content");
     if (!el) return;
 
-    const canvas = await html2canvas(el, { scale: 2, useCORS: true });
-    const imgData = canvas.toDataURL("image/png");
+    // html-to-image renders via the browser engine, so modern CSS color
+    // spaces (Tailwind v4's oklch) survive. The article is a scroll container
+    // (overflow-y-auto), so it must be temporarily expanded to its full
+    // scrollHeight — otherwise only the visible viewport gets captured and the
+    // exported PDF comes out mostly blank.
+    const prevStyle = {
+      height: el.style.height,
+      maxHeight: el.style.maxHeight,
+      overflow: el.style.overflow,
+    };
+    const fullHeight = el.scrollHeight;
+    el.style.height = `${fullHeight}px`;
+    el.style.maxHeight = "none";
+    el.style.overflow = "visible";
+
+    let dataUrl: string;
+    try {
+      dataUrl = await toPng(el, {
+        pixelRatio: 2,
+        cacheBust: true,
+        backgroundColor: "#ffffff",
+      });
+    } catch {
+      // Last-resort fallback: the browser's print dialog exports to PDF and
+      // handles arbitrarily long documents.
+      window.print();
+      return;
+    } finally {
+      el.style.height = prevStyle.height;
+      el.style.maxHeight = prevStyle.maxHeight;
+      el.style.overflow = prevStyle.overflow;
+    }
+
+    const img = new window.Image();
+    img.src = dataUrl;
+    await img.decode();
+
     const pdf = new jsPDF("p", "mm", "a4");
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
     const imgWidth = pageWidth - 20;
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+    const imgHeight = (img.height * imgWidth) / img.width;
 
     if (imgHeight <= pageHeight - 20) {
-      pdf.addImage(imgData, "PNG", 10, 10, imgWidth, imgHeight);
-    } else {
-      let remaining = imgHeight;
-      let srcY = 0;
-      while (remaining > 0) {
-        const sliceH = Math.min(remaining, pageHeight - 20);
-        const sliceRatio = sliceH / imgHeight;
-        const sliceCanvas = window.document.createElement("canvas");
-        sliceCanvas.width = canvas.width;
-        sliceCanvas.height = canvas.height * sliceRatio;
-        const ctx = sliceCanvas.getContext("2d")!;
-        ctx.drawImage(
-          canvas,
-          0,
-          srcY,
-          canvas.width,
-          canvas.height * sliceRatio,
-          0,
-          0,
-          canvas.width,
-          canvas.height * sliceRatio,
-        );
-        pdf.addImage(
-          sliceCanvas.toDataURL("image/png"),
-          "PNG",
-          10,
-          10,
-          imgWidth,
-          sliceH,
-        );
-        remaining -= sliceH;
-        srcY += canvas.height * sliceRatio;
-        if (remaining > 0) pdf.addPage();
-      }
+      pdf.addImage(dataUrl, "PNG", 10, 10, imgWidth, imgHeight);
+      pdf.save("documentation.pdf");
+      return;
+    }
+
+    // Slice the tall full-document image into A4-height bands. All math is in
+    // image pixels: each band is exactly one readable page.
+    const mmPerImagePx = imgWidth / img.width;
+    const pageBandPx = Math.floor((pageHeight - 20) / mmPerImagePx);
+    let srcY = 0;
+    let page = 0;
+    while (srcY < img.height) {
+      const bandH = Math.min(pageBandPx, img.height - srcY);
+      const sliceCanvas = window.document.createElement("canvas");
+      sliceCanvas.width = img.width;
+      sliceCanvas.height = bandH;
+      const ctx = sliceCanvas.getContext("2d")!;
+      ctx.drawImage(img, 0, srcY, img.width, bandH, 0, 0, img.width, bandH);
+      if (page > 0) pdf.addPage();
+      pdf.addImage(sliceCanvas.toDataURL("image/png"), "PNG", 10, 10, imgWidth, bandH * mmPerImagePx);
+      srcY += bandH;
+      page += 1;
     }
 
     pdf.save("documentation.pdf");
   };
 
-  const handleNewDoc = () => {
+const handleNewDoc = () => {
+    stopPolling();
+    stopStreaming();
     setPhase("submit");
     setRuns([]);
     setStatus("");
     setError("");
+    setLiveDraft({ api: "", architecture: "" });
   };
 
   const statusLabel: Record<string, string> = {
@@ -306,7 +434,7 @@ export default function App() {
 
         <main className="relative z-10 min-h-screen max-w-6xl mx-auto px-6 py-8 flex items-center">
           <div className="grid lg:grid-cols-[1.05fr_0.95fr] gap-10 items-center w-full">
-            <section className="min-h-[520px] flex flex-col justify-between">
+            <section className="min-h-0 lg:min-h-[520px] flex flex-col justify-between">
               <div className="inline-flex items-center gap-3 text-sm font-semibold text-slate-700">
                 <span className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center shadow-lg shadow-slate-900/15">
                   <svg
@@ -354,7 +482,7 @@ export default function App() {
               </div>
             </section>
 
-            <section className="relative min-h-[560px] flex items-center justify-center">
+            <section className="relative min-h-0 lg:min-h-[560px] flex items-center justify-center">
               <div className="absolute inset-x-8 top-8 bottom-8 rounded-[2rem] bg-white/45 border border-white/80 shadow-2xl shadow-slate-900/10 backdrop-blur-xl" />
               <div className="document-handoff-scene" aria-hidden="true">
                 <img
@@ -434,7 +562,7 @@ export default function App() {
                   v2.0
                 </span>
               </h1>
-              <p className="text-xs text-slate-400">
+<p className="text-xs text-slate-400 hidden sm:block">
                 Automated Documentation Workspace
               </p>
             </div>
@@ -564,7 +692,7 @@ export default function App() {
                 <span className="w-2 h-2 rounded-full bg-sky-500" />
                 Folder Repository Indexing
               </span>
-              <h2 className="text-3xl font-bold text-slate-900 tracking-tight mb-2">
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight mb-2">
                 Generate Technical Documentation
               </h2>
               <p className="text-slate-500 text-sm max-w-lg mx-auto">
@@ -608,13 +736,25 @@ export default function App() {
                   .join(" / ") || "Starting..."}
               </p>
 
-              {/* Animated Progress Bar */}
+{/* Animated Progress Bar */}
               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-200/60 mb-2">
                 <div className="bg-gradient-to-r from-sky-500 to-indigo-500 h-full w-2/3 rounded-full" />
               </div>
               <p className="text-xs text-slate-400">
                 Parsing code structure and formatting document sheets...
               </p>
+
+              {liveDraft[activeDoc] && (
+                <div className="mt-5 text-left">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400 mb-2">
+                    Live draft
+                  </p>
+                  <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap break-words rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600 font-mono">
+                    {liveDraft[activeDoc]}
+                    <span className="inline-block w-1.5 h-3.5 bg-sky-500 animate-pulse align-middle" />
+                  </pre>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -630,8 +770,8 @@ export default function App() {
               ? "Endpoints, payloads, and integration details"
               : "System structure, modules, and data flow";
           return (
-            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_24rem] gap-3 h-[calc(100vh-40px)] animate-document-unfold">
-              <section className="min-w-0 flex flex-col gap-3 overflow-hidden">
+<div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_24rem] gap-3 lg:h-[calc(100vh-96px)] min-h-0 animate-document-unfold">
+              <section className="min-w-0 flex flex-col gap-3 lg:overflow-hidden">
                 <div className="bg-white border border-slate-200/80 rounded-2xl shadow-document px-4 py-3 sm:px-5">
                   <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                     <div className="min-w-0">
@@ -758,7 +898,7 @@ export default function App() {
                 </div>
               </section>
 
-              <aside className="w-full min-h-0 shrink-0 lg:h-full">
+              <aside className="w-full min-h-0 shrink-0 h-[72vh] lg:h-full">
                 <ChatPanel
                   runId={activeRunRun.runId}
                   onDocumentUpdate={(doc) =>

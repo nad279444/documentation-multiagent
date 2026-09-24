@@ -1,6 +1,6 @@
 """Shared type definitions for the codebase."""
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 
 class ChunkDict(TypedDict):
@@ -39,6 +39,8 @@ class EvalCheckDict(TypedDict):
     """Result of a single evaluation check."""
     passed: bool
     detail: str
+    score: NotRequired[float]
+    meta: NotRequired[dict[str, object]]
 
 
 class EvalResultDict(TypedDict):
@@ -46,3 +48,28 @@ class EvalResultDict(TypedDict):
     passed: bool
     checks: dict[str, EvalCheckDict]
     feedback: str
+    metrics: NotRequired[dict[str, float]]
+
+
+# --- Document template contract -------------------------------------------
+# Single source of truth shared by the generator prompts (section list and
+# examples must stay consistent with this) and the evaluator
+# (_check_schema validates a generated doc against these headings).
+
+API_DOC_TEMPLATE = [
+    "Overview",
+    "Authentication",
+    "Endpoints",
+    "Request / Response Schemas",
+    "Errors",
+    "Usage Examples",
+]
+
+ARCHITECTURE_TEMPLATE = [
+    "Overview",
+    "Components",
+    "Data Flow",
+    "Dependencies",
+    "Design Patterns",
+    "Diagrams",
+]

@@ -6,6 +6,35 @@ code graph, indexes it for retrieval, generates API or architecture
 documentation with an LLM, and automatically evaluates the result — revising
 it until it passes or escalating it for human review.
 
+## Recent improvements
+
+- **Live streaming progress** — generation streams stage updates and
+  generated tokens over SSE (`GET /runs/{id}/stream`); the UI reveals the
+  draft at a readable typing pace instead of a long wait then a sudden dump.
+  Chat replies type out too. Note: event buffers are in-process, so a
+  single instance is currently assumed per run.
+- **Observability & rubric scoring** — LangGraph runs are traced to LangSmith,
+  and the evaluator computes a numeric rubric (citation groundedness, endpoint
+  completeness, readability, structure, jargon) with an accuracy × clarity
+  "overall" score pushed back to the run as LangSmith feedback. The generators
+  and evaluator share one heading contract (`api/schema.py`) enforced by the
+  schema check.
+- **Conversations that persist** — chat history is stored per repo workspace
+  (`chat_messages`, keyed by user + repo) rather than per run, so the same
+  thread carries across the API Reference / Architecture tabs, survives
+  logout/login, and "Clear" deletes the whole thread (`GET|DELETE
+  /runs/{id}/chat/history`). The chat endpoint is owner-validated.
+- **Session restore** — `GET /runs` returns the latest completed document per
+  type, so returning users land back on their last document and conversation.
+- **Reliable PDF export** — export renders via `html-to-image` (browser
+  engine, so Tailwind v4 `oklch` colors survive), captures the full scroll
+  height, and slices across A4 pages with a `window.print()` fallback.
+- **Responsive UI** — the app is laid out for phones and tablets across the
+  login, submit, processing, and document-view phases (scrollable stacked view,
+  bounded chat height, wrapping toolbars, safe-area viewport).
+- **Eval robustness** — eval reports are JSON-serialized defensively so a
+  non-serializable check payload can never fail a run.
+
 ## Repo layout
 
 ```
@@ -53,13 +82,17 @@ ingest -> generate -> evaluate -> [publish | generate (revise) | human_review]
 6. **Evaluate** — deterministic checks run first (citations resolve, all
    endpoints covered, schema well-formed, no secrets leaked); an LLM judge
    only runs once those pass, and only for fuzzy criteria (clarity,
-   redundancy). Failed docs are regenerated with feedback, up to
+   redundancy). Every metric maps to an accuracy/clarity rubric and the
+   overall score is pushed to the LangSmith run as feedback when tracing is
+   enabled. Failed docs are regenerated with feedback, up to
    `MAX_EVAL_RETRIES`; beyond that they're kept and flagged
    `needs_human_review`, never discarded.
 7. **Chat** — for an existing run you can ask questions or request edits. A
    tool-calling agent edits the document (updates persisted) with guardrails
-   keeping the conversation on-topic, and an in-memory cache dedupes repeated
-   questions.
+   keeping the conversation on-topic, an in-memory cache dedupes repeated
+   questions, and every message is persisted to the repo's workspace thread so
+   the same conversation is shared by both document tabs and survives
+   logout/login.
 
 ## Prerequisites
 
@@ -99,6 +132,8 @@ PINECONE_REGION=us-east-1
 GOOGLE_CLIENT_ID=...apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=...
 COHERE_API_KEY=...                   # optional reranker (skipped if unset)
+LANGSMITH_API_KEY=lsv2_...           # optional tracing + eval feedback
+LANGSMITH_PROJECT=doc-agent
 ```
 
 Optional tunables: `LLM_MODEL` (default `gpt-4o-mini`), `EMBEDDING_MODEL`
@@ -138,9 +173,13 @@ the FastAPI server on port 8000. Signing in requires the OAuth client's
 | GET    | `/health`                  | Health check                                 |
 | POST   | `/auth/verify`             | Verify Google ID token, return user + sessions |
 | POST   | `/generate`                | Start a documentation run (`repo_url`, `doc_type`, `branch?`) |
+| GET    | `/runs`                    | Latest completed run per doc type (session restore) |
 | GET    | `/runs/{run_id}`           | Run status + output (owner-only)             |
 | GET    | `/runs/{run_id}/document`  | Plain-text markdown of the generated doc     |
+| GET    | `/runs/{run_id}/stream`    | SSE live progress: stages, tokens, done (owner-only) |
 | POST   | `/runs/{run_id}/chat`      | Ask about / request edits to a document      |
+| GET    | `/runs/{run_id}/chat/history` | Persisted conversation for the repo workspace |
+| DELETE | `/runs/{run_id}/chat`      | Clear the entire conversation thread         |
 | GET    | `/sessions`                | List the user's recent sessions              |
 
 Most endpoints require `Authorization: Bearer <google_id_token>`.

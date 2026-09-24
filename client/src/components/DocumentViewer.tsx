@@ -134,7 +134,7 @@ export default function DocumentViewer({
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <button
             onClick={() => {
               setDraft(content);
@@ -219,7 +219,7 @@ export default function DocumentViewer({
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            className="w-full min-h-[650px] p-4 font-mono text-xs sm:text-sm text-slate-800 leading-relaxed bg-slate-50/50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 resize-y"
+            className="w-full min-h-[45vh] sm:min-h-[650px] p-4 font-mono text-xs sm:text-sm text-slate-800 leading-relaxed bg-slate-50/50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 resize-y"
           />
         ) : (
           <article

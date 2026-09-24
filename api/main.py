@@ -6,17 +6,25 @@ production this hands off to Cloud Tasks; here BackgroundTasks keeps the
 same shape without the extra infrastructure.
 """
 
+import json
 import logging
+import threading
 import time
 import uuid
+from collections import deque
 from contextlib import asynccontextmanager
 
 from auth import get_current_user
+from config import get_settings
 from db import (
+    append_chat_message,
+    clear_chat_messages,
     complete_run,
     create_session,
     get_cached_run,
+    get_chat_messages,
     get_conn,
+    get_recent_runs,
     get_user_sessions,
     init_db,
     record_run,
@@ -25,6 +33,8 @@ from db import (
 from graphs.doc_graph import build_graph
 from ingest.cloner import IngestError, validate_repo_url
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
 logging.basicConfig(
@@ -39,6 +49,74 @@ _graph = None
 _chat_cache: dict[tuple[int, str, str], tuple[float, "ChatResponseModel"]] = {}
 _CHAT_CACHE_MAX = 128
 _CHAT_CACHE_TTL_SECONDS = 600
+
+# Per-run SSE event buffers. The background pipeline writes stage/token/done
+# events here and GET /runs/{id}/stream reads them, so the frontend sees
+# progress live instead of waiting for the run to finish.
+_HB = object()   # heartbeat sentinel
+_EOS = object()  # end-of-stream sentinel
+
+
+class RunEventBuffer:
+    """Thread-safe event channel feeding one or more SSE clients."""
+
+    def __init__(self) -> None:
+        self._items: deque[dict] = deque()
+        self._cond = threading.Condition()
+        self._finished = False
+
+    def push(self, item: dict) -> None:
+        with self._cond:
+            if self._finished:
+                return
+            self._items.append(item)
+            self._cond.notify_all()
+
+    def close(self) -> None:
+        with self._cond:
+            self._finished = True
+            self._cond.notify_all()
+
+    def _pop(self) -> object:
+        with self._cond:
+            if self._items:
+                return self._items.popleft()
+            if self._finished:
+                return _EOS
+            self._cond.wait(timeout=15.0)
+            if self._items:
+                return self._items.popleft()
+            return _HB
+
+    def events(self):
+        while True:
+            item = self._pop()
+            if item is _HB:
+                yield ": ping\n\n"
+                continue
+            if item is _EOS:
+                return
+            yield f"data: {json.dumps(item)}\n\n"
+
+
+_buffers: dict[int, RunEventBuffer] = {}
+_buffers_lock = threading.Lock()
+
+
+def _buffer_for(run_id: int) -> RunEventBuffer:
+    with _buffers_lock:
+        buf = _buffers.get(run_id)
+        if buf is None:
+            buf = RunEventBuffer()
+            _buffers[run_id] = buf
+        return buf
+
+
+SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
 
 
 @asynccontextmanager
@@ -135,31 +213,148 @@ def generate(
 
 
 def _run_pipeline(run_id: int, thread_id: str, req: GenerateRequest) -> None:
+    buffer = _buffer_for(run_id)
     if _graph is None:
         complete_run(run_id, status="error", output=None, eval_report={"error": "Graph not initialized"})
+        buffer.push({"type": "error", "error": "Graph not initialized"})
+        buffer.close()
         return
+
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id},
+        "run_name": f"doc-generate-{req.doc_type}",
+        "tags": ["doc-agent", f"type:{req.doc_type}"],
+        "metadata": {
+            "repo_url": req.repo_url,
+            "llm_model": get_settings().llm_model,
+        },
+    }
+
+    final_state: dict = {}
     try:
-        result = _graph.invoke(
+        # stream_mode="custom" carries the node stage events, "messages" the
+        # generated-token chunks, and "updates" lets us assemble the final
+        # state without a second get_state round-trip.
+        stream = _graph.stream(
             {
                 "repo_url": req.repo_url,
                 "doc_type": req.doc_type,
                 "branch": req.branch,
                 "retry_count": 0,
             },
-            config={"configurable": {"thread_id": thread_id}},
+            config=config,
+            stream_mode=["custom", "messages", "updates"],
         )
+
+        for mode, payload in stream:
+            if mode == "custom":
+                if isinstance(payload, dict) and payload.get("type") == "stage":
+                    buffer.push(payload)
+            elif mode == "updates":
+                payload_dict: dict[str, object] = (
+                    payload if isinstance(payload, dict) else {}
+                )
+                for update in payload_dict.values():
+                    if isinstance(update, dict):
+                        final_state.update(update)
+            elif mode == "messages":
+                token = _extract_generate_token(payload)
+                if token:
+                    buffer.push({"type": "token", "text": token})
+
+        # Prefer the checkpointed state (authoritative) over merged updates.
+        try:
+            checkpoint = _graph.get_state(config).values
+            if checkpoint:
+                final_state = checkpoint
+        except Exception:
+            pass
+
         complete_run(
             run_id,
-            status=result.get("status", "unknown"),
-            output=result.get("draft"),
-            eval_report=result.get("eval_result"),
+            status=final_state.get("status", "unknown"),
+            output=final_state.get("draft"),
+            eval_report=final_state.get("eval_result"),
         )
-        logger.info("Run %s finished: %s", run_id, result.get("status"))
+        buffer.push(
+            {
+                "type": "done",
+                "status": final_state.get("status", "unknown"),
+                "has_doc": bool(final_state.get("draft")),
+            }
+        )
+        logger.info("Run %s finished: %s", run_id, final_state.get("status"))
     except Exception as exc:
         logger.exception("Run %s failed", run_id)
         complete_run(
             run_id, status="error", output=None, eval_report={"error": str(exc)}
         )
+        buffer.push({"type": "error", "error": str(exc)})
+    finally:
+        buffer.close()
+
+
+def _extract_generate_token(payload) -> str | None:
+    """Token text from a (chunk, metadata) messages payload, only for generation.
+
+    The evaluator still uses invoke(), so every streamed token that reaches the
+    client is real document prose, not judge chatter.
+    """
+    try:
+        chunk, metadata = payload
+    except (TypeError, ValueError):
+        return None
+    if (metadata or {}).get("langgraph_node") != "generate":
+        return None
+    content = getattr(chunk, "content", None)
+    if not content:
+        return None
+    return content if isinstance(content, str) else str(content)
+
+
+_TERMINAL_STATUSES = (
+    "passed",
+    "approved",
+    "needs_revision",
+    "needs_human_review",
+    "error",
+)
+
+
+def _terminal_done(status: str):
+    yield f"data: {json.dumps({'type': 'done', 'status': status, 'has_doc': True})}\n\n"
+
+
+@app.get("/runs/{run_id}/stream")
+def stream_run(run_id: int, user: dict = Depends(get_current_user)):
+    """Server-Sent Events: stage + token progress for one run (owner only)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT status FROM doc_runs WHERE id = %s AND user_id = %s",
+            (run_id, user["id"]),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    if row[0] in _TERMINAL_STATUSES:
+        # Already finished: emit a single done event so the client can stop.
+        return StreamingResponse(
+            _terminal_done(row[0]),
+            media_type="text/event-stream",
+            headers=SSE_HEADERS,
+        )
+
+    return StreamingResponse(
+        _buffer_for(run_id).events(),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )
+
+
+@app.get("/runs")
+def recent_runs(user: dict = Depends(get_current_user)):
+    """Latest completed document per doc_type — used to restore a session."""
+    return {"runs": get_recent_runs(user["id"])}
 
 
 @app.get("/runs/{run_id}")
@@ -220,11 +415,13 @@ class ChatResponseModel(BaseModel):
 
 
 @app.post("/runs/{run_id}/chat", response_model=ChatResponseModel)
-def chat_with_document(run_id: int, req: ChatRequest):
+def chat_with_document(
+    run_id: int, req: ChatRequest, user: dict = Depends(get_current_user)
+):
     with get_conn() as conn:
         row = conn.execute(
             """
-            SELECT r.output, r.repo_id, repos.last_indexed_sha
+            SELECT r.output, r.repo_id, r.user_id, repos.last_indexed_sha
             FROM doc_runs r JOIN repos ON repos.id = r.repo_id
             WHERE r.id = %s
             """,
@@ -232,8 +429,10 @@ def chat_with_document(run_id: int, req: ChatRequest):
         ).fetchone()
     if not row or not row[0]:
         raise HTTPException(status_code=404, detail="No document available yet")
+    if row[2] != user["id"]:
+        raise HTTPException(status_code=404, detail="Run not found")
 
-    document, repo_id, commit_sha = row
+    document, repo_id, _, commit_sha = row
 
     # Cache hit: exact same question on the same document version.
     now = time.time()
@@ -264,6 +463,13 @@ def chat_with_document(run_id: int, req: ChatRequest):
         user_message=req.message, document=document, source_context=source_context
     )
 
+    # Persist the conversation in the workspace thread (user + repo), shared
+    # by both document tabs, so it survives logout/login and tab switches.
+    append_chat_message(user["id"], repo_id, "user", req.message)
+    append_chat_message(
+        user["id"], repo_id, "assistant", result.reply, edited=result.edited
+    )
+
     response = ChatResponseModel(
         reply=result.reply, document=result.document, edited=result.edited
     )
@@ -284,3 +490,30 @@ def chat_with_document(run_id: int, req: ChatRequest):
             del _chat_cache[oldest]
 
     return response
+
+
+def _run_workspace(run_id: int, user: dict) -> int:
+    """404 unless the run exists and belongs to the user; returns its repo_id."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT repo_id FROM doc_runs WHERE id = %s AND user_id = %s",
+            (run_id, user["id"]),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return row[0]
+
+
+@app.get("/runs/{run_id}/chat/history")
+def chat_history(run_id: int, user: dict = Depends(get_current_user)):
+    """Persisted conversation for the run's workspace (owner only)."""
+    repo_id = _run_workspace(run_id, user)
+    return {"messages": get_chat_messages(user["id"], repo_id)}
+
+
+@app.delete("/runs/{run_id}/chat")
+def delete_chat_history(run_id: int, user: dict = Depends(get_current_user)):
+    """Clear the entire conversation thread for the run's workspace (owner only)."""
+    repo_id = _run_workspace(run_id, user)
+    clear_chat_messages(user["id"], repo_id)
+    return {"ok": True}
