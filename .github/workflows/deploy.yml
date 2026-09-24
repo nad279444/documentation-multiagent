@@ -31,6 +31,7 @@ jobs:
             --region us-central1 \
             --platform managed \
             --allow-unauthenticated \
+            --service-account=github-deployer@documentation-agent-508614.iam.gserviceaccount.com \
             --set-secrets OPENAI_API_KEY=OPENAI_API_KEY:latest \
             --set-secrets DATABASE_URL=DATABASE_URL:latest \
             --set-secrets PINECONE_API_KEY=PINECONE_API_KEY:latest \
