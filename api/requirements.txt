@@ -1,7 +1,25 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
-langgraph>=0.2.34
-langchain-core>=0.3.10
-langchain-openai>=0.2.8
-openai>=1.54.0
+python-dotenv>=1.0.0
+google-auth>=2.58.0
+langgraph>=1.2.11
+langgraph-checkpoint-postgres>=3.1.2
+langchain-core>=1.6.3
+langchain-openai>=1.6.2
+langsmith>=0.12.4
+openai>=2.54.0
 pydantic==2.9.2
+
+# Postgres (Neon)
+psycopg[binary]>=3.3.5
+psycopg-pool>=3.3.1
+
+# Vector store
+pinecone>=10.0.0
+
+# Code parsing
+tree-sitter==0.23.2
+tree-sitter-language-pack==0.3.0
+
+# Optional reranker (skipped automatically when COHERE_API_KEY is unset)
+cohere>=7.1.1

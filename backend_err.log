@@ -1,0 +1,6 @@
+INFO:     Started server process [24136]
+INFO:     Waiting for application startup.
+2026-09-23 12:27:25,023 INFO db: Database schema initialised
+2026-09-23 12:27:25,051 INFO main: Graph compiled with Postgres checkpointing
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)

@@ -31,4 +31,12 @@ jobs:
             --region us-central1 \
             --platform managed \
             --allow-unauthenticated \
-            --set-secrets OPENAI_API_KEY=OPENAI_API_KEY:latest
+            --service-account=github-deployer@documentation-agent-508614.iam.gserviceaccount.com \
+            --set-secrets OPENAI_API_KEY=OPENAI_API_KEY:latest \
+            --set-secrets DATABASE_URL=DATABASE_URL:latest \
+            --set-secrets PINECONE_API_KEY=PINECONE_API_KEY:latest \
+            --set-secrets COHERE_API_KEY=COHERE_API_KEY:latest \
+            --set-secrets GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest \
+            --set-secrets GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest \
+            --set-secrets LANGSMITH_API_KEY=LANGSMITH_API_KEY:latest \
+            --set-env-vars PINECONE_INDEX=doc-agent,LLM_MODEL=gpt-4o-mini,EMBEDDING_MODEL=text-embedding-3-small,MAX_EVAL_RETRIES=2,RETRIEVAL_TOP_K=8,LANGSMITH_PROJECT=doc-agent,LANGSMITH_TRACING=true,LANGSMITH_ENDPOINT=https://api.smith.langchain.com

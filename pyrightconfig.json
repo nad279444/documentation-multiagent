@@ -1,0 +1,6 @@
+{
+  "venvPath": "api",
+  "venv": "venv",
+  "include": ["api"],
+  "extraPaths": ["api"]
+}
