@@ -271,7 +271,7 @@ def get_cached_run(repo_id: int, user_id: int, doc_type: str) -> dict | None:
         row = conn.execute(
             """
             SELECT id, thread_id, status, commit_sha FROM doc_runs
-            WHERE repo_id = %s AND user_id = %s AND doc_type = %s AND status IN ('approved', 'needs_human_review')
+            WHERE repo_id = %s AND user_id = %s AND doc_type = %s AND status IN ('passed', 'needs_human_review') AND output IS NOT NULL
             ORDER BY id DESC LIMIT 1
             """,
             (repo_id, user_id, doc_type),

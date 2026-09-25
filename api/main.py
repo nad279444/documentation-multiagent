@@ -372,8 +372,8 @@ _TERMINAL_STATUSES = (
 )
 
 
-def _terminal_done(status: str):
-    yield f"data: {json.dumps({'type': 'done', 'status': status, 'has_doc': True})}\n\n"
+def _terminal_done(status: str, has_doc: bool):
+    yield f"data: {json.dumps({'type': 'done', 'status': status, 'has_doc': has_doc})}\n\n"
 
 
 @app.get("/runs/{run_id}/stream")
@@ -381,7 +381,7 @@ def stream_run(run_id: int, user: dict = Depends(get_current_user)):
     """Server-Sent Events: stage + token progress for one run (owner only)."""
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT status FROM doc_runs WHERE id = %s AND user_id = %s",
+            "SELECT status, output IS NOT NULL FROM doc_runs WHERE id = %s AND user_id = %s",
             (run_id, user["id"]),
         ).fetchone()
     if not row:
@@ -390,7 +390,7 @@ def stream_run(run_id: int, user: dict = Depends(get_current_user)):
     if row[0] in _TERMINAL_STATUSES:
         # Already finished: emit a single done event so the client can stop.
         return StreamingResponse(
-            _terminal_done(row[0]),
+            _terminal_done(row[0], bool(row[1])),
             media_type="text/event-stream",
             headers=SSE_HEADERS,
         )

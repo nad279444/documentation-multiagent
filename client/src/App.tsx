@@ -17,16 +17,33 @@ interface DocRun {
   status: string;
   document: string;
   cacheHit: boolean;
+  evalReport?: Record<string, unknown> | null;
 }
 
 type Phase = "login" | "submit" | "polling" | "view";
 
+// "passed" is what the graph's publish_node actually writes; "approved" is only
+// ever a stage-event name, never a stored run status.
 const TERMINAL_STATUSES = [
+  "passed",
   "approved",
   "needs_revision",
   "needs_human_review",
   "error",
 ];
+
+// Runs that end with no document nearly always failed for a knowable reason.
+// Prefer the backend's recorded error over a generic message so the actual
+// cause (missing API key, clone failure, bad model response) is not discarded.
+const describeMissingDoc = (runs: DocRun[]): string => {
+  for (const run of runs) {
+    if (run.status !== "error") continue;
+    const reason = run.evalReport?.error;
+    if (typeof reason === "string" && reason) return reason;
+    return "Generation failed";
+  }
+  return "Generation completed without any output";
+};
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>("login");
@@ -179,10 +196,12 @@ const handleLogout = () => {
           });
           // Cache hits return a completed run immediately.
           let document = "";
+          let evalReport: Record<string, unknown> | null = null;
           if (res.cached) {
             try {
               const run = await getRun(res.run_id);
               if (run.output) document = run.output;
+              evalReport = run.eval_report ?? null;
             } catch {
               /* ignore, polling will surface it */
             }
@@ -193,6 +212,7 @@ const handleLogout = () => {
             status: res.status,
             document,
             cacheHit: res.cached,
+            evalReport,
           } satisfies DocRun;
         }),
       );
@@ -248,6 +268,7 @@ setRuns(results);
             ...r,
             status: run.status,
             document: run.output ?? r.document,
+            evalReport: run.eval_report ?? r.evalReport,
           };
         } catch {
           return r;
@@ -260,7 +281,7 @@ setRuns(results);
     if (done) {
       stopPolling();
       setPhase(hasAnyDocs ? "view" : "submit");
-      if (!hasAnyDocs) setError("Generation completed without any output");
+      if (!hasAnyDocs) setError(describeMissingDoc(refreshed));
     }
   };
 
@@ -275,17 +296,11 @@ setRuns(results);
             if (terminal.includes(r.status) && r.document) return r;
             const run = await getRun(r.runId);
             setStatus(run.status);
-            if (run.status === "error" && !run.output) {
-              setError(
-                run.eval_report && "error" in run.eval_report
-                  ? String(run.eval_report.error)
-                  : "Generation failed",
-              );
-            }
             return {
               ...r,
               status: run.status,
               document: run.output ?? r.document,
+              evalReport: run.eval_report ?? r.evalReport,
             };
           }),
         );
@@ -295,7 +310,7 @@ setRuns(results);
           stopPolling();
           const hasAnyDocs = updated.some((r) => r.document);
           setPhase(hasAnyDocs ? "view" : "submit");
-          if (!hasAnyDocs) setError("Generation completed without any output");
+          if (!hasAnyDocs) setError(describeMissingDoc(updated));
         }
       } catch {
         stopPolling();
@@ -327,9 +342,10 @@ const handleDownload = async () => {
     if (!el) return;
 
     // html-to-image renders via the browser engine, so modern CSS color
-    // spaces (Tailwind v4's oklch) survive. Pin the article to its full
-    // scrollHeight so the capture is never clipped if the element later gains
-    // a height constraint or becomes a scroll container again.
+    // spaces (Tailwind v4's oklch) survive. The article is a scroll container
+    // (overflow-y-auto), so it must be temporarily expanded to its full
+    // scrollHeight — otherwise only the visible viewport gets captured and the
+    // exported PDF comes out mostly blank.
     const prevStyle = {
       height: el.style.height,
       maxHeight: el.style.maxHeight,
@@ -769,8 +785,8 @@ const handleNewDoc = () => {
               ? "Endpoints, payloads, and integration details"
               : "System structure, modules, and data flow";
           return (
-            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_24rem] gap-3 items-start animate-document-unfold">
-              <section className="min-w-0 flex flex-col gap-3">
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_24rem] gap-3 lg:h-[calc((100vh-6rem)*0.7)] min-h-0 animate-document-unfold">
+              <section className="min-w-0 flex flex-col gap-3 lg:overflow-hidden">
                 <div className="bg-white border border-slate-200/80 rounded-2xl shadow-document px-4 py-3 sm:px-5">
                   <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                     <div className="min-w-0">
@@ -886,7 +902,7 @@ const handleNewDoc = () => {
                   </div>
                 </div>
 
-                <div className="pr-1">
+                <div className="min-h-0 flex-1 pr-1">
                   <DocumentViewer
                     content={activeRunRun.document}
                     onSave={handleSave}
@@ -897,7 +913,7 @@ const handleNewDoc = () => {
                 </div>
               </section>
 
-              <aside className="w-full min-h-0 shrink-0 h-[72vh] lg:sticky lg:top-20 lg:h-[calc(100vh-6rem)] self-start">
+              <aside className="w-full min-h-0 shrink-0 h-[72vh] lg:h-full">
                 <ChatPanel
                   runId={activeRunRun.runId}
                   onDocumentUpdate={(doc) =>
