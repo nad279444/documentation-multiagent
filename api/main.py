@@ -28,13 +28,14 @@ from db import (
     get_user_sessions,
     init_db,
     record_run,
+    set_run_commit_sha,
     upsert_repo,
 )
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from graphs.doc_graph import build_graph
-from ingest.cloner import IngestError, validate_repo_url
+from ingest.cloner import IngestError, get_remote_head_sha, validate_repo_url
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
@@ -207,20 +208,38 @@ def generate(
 
     repo_id = upsert_repo(clean_url, req.branch)
 
-    # Cache check: if a completed run exists for this repo + doc_type, return it immediately
     cached = get_cached_run(repo_id, user["id"], req.doc_type)
     if cached:
+        current_sha = None
+        if cached.get("commit_sha"):
+            try:
+                current_sha = get_remote_head_sha(clean_url, req.branch)
+            except IngestError as exc:
+                logger.warning(
+                    "Remote commit check failed for %s; treating cache as stale: %s",
+                    clean_url,
+                    exc,
+                )
+        if current_sha and current_sha == cached.get("commit_sha"):
+            logger.info(
+                "Cache hit: returning existing run %s for %s [%s @ %s]",
+                cached["run_id"],
+                clean_url,
+                req.doc_type,
+                current_sha[:8],
+            )
+            return GenerateResponse(
+                run_id=cached["run_id"],
+                thread_id=cached["thread_id"],
+                status=cached["status"],
+                cached=True,
+            )
         logger.info(
-            "Cache hit: returning existing run %s for %s [%s]",
-            cached["run_id"],
+            "Cache miss for %s [%s]: remote=%s cached=%s",
             clean_url,
             req.doc_type,
-        )
-        return GenerateResponse(
-            run_id=cached["run_id"],
-            thread_id=cached["thread_id"],
-            status=cached["status"],
-            cached=True,
+            current_sha[:8] if current_sha else "unknown",
+            (cached.get("commit_sha") or "unknown")[:8],
         )
 
     thread_id = str(uuid.uuid4())
@@ -301,6 +320,7 @@ def _run_pipeline(run_id: int, thread_id: str, req: GenerateRequest) -> None:
         except Exception:
             pass
 
+        set_run_commit_sha(run_id, str(final_state.get("commit_sha") or ""))
         complete_run(
             run_id,
             status=final_state.get("status", "unknown"),

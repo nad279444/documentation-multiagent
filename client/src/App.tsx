@@ -327,10 +327,9 @@ const handleDownload = async () => {
     if (!el) return;
 
     // html-to-image renders via the browser engine, so modern CSS color
-    // spaces (Tailwind v4's oklch) survive. The article is a scroll container
-    // (overflow-y-auto), so it must be temporarily expanded to its full
-    // scrollHeight — otherwise only the visible viewport gets captured and the
-    // exported PDF comes out mostly blank.
+    // spaces (Tailwind v4's oklch) survive. Pin the article to its full
+    // scrollHeight so the capture is never clipped if the element later gains
+    // a height constraint or becomes a scroll container again.
     const prevStyle = {
       height: el.style.height,
       maxHeight: el.style.maxHeight,
@@ -770,8 +769,8 @@ const handleNewDoc = () => {
               ? "Endpoints, payloads, and integration details"
               : "System structure, modules, and data flow";
           return (
-<div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_24rem] gap-3 lg:h-[calc(100vh-96px)] min-h-0 animate-document-unfold">
-              <section className="min-w-0 flex flex-col gap-3 lg:overflow-hidden">
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_24rem] gap-3 items-start animate-document-unfold">
+              <section className="min-w-0 flex flex-col gap-3">
                 <div className="bg-white border border-slate-200/80 rounded-2xl shadow-document px-4 py-3 sm:px-5">
                   <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                     <div className="min-w-0">
@@ -887,7 +886,7 @@ const handleNewDoc = () => {
                   </div>
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                <div className="pr-1">
                   <DocumentViewer
                     content={activeRunRun.document}
                     onSave={handleSave}
@@ -898,7 +897,7 @@ const handleNewDoc = () => {
                 </div>
               </section>
 
-              <aside className="w-full min-h-0 shrink-0 h-[72vh] lg:h-full">
+              <aside className="w-full min-h-0 shrink-0 h-[72vh] lg:sticky lg:top-20 lg:h-[calc(100vh-6rem)] self-start">
                 <ChatPanel
                   runId={activeRunRun.runId}
                   onDocumentUpdate={(doc) =>

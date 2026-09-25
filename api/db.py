@@ -255,12 +255,22 @@ def complete_run(
         )
 
 
+def set_run_commit_sha(run_id: int, commit_sha: str) -> None:
+    if not commit_sha:
+        return
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE doc_runs SET commit_sha = %s WHERE id = %s",
+            (commit_sha, run_id),
+        )
+
+
 def get_cached_run(repo_id: int, user_id: int, doc_type: str) -> dict | None:
-    """Return the most recent completed run for this repo + doc_type, or None."""
+    """Return the most recent completed run and its source commit."""
     with get_conn() as conn:
         row = conn.execute(
             """
-            SELECT id, thread_id, status FROM doc_runs
+            SELECT id, thread_id, status, commit_sha FROM doc_runs
             WHERE repo_id = %s AND user_id = %s AND doc_type = %s AND status IN ('approved', 'needs_human_review')
             ORDER BY id DESC LIMIT 1
             """,
@@ -268,7 +278,12 @@ def get_cached_run(repo_id: int, user_id: int, doc_type: str) -> dict | None:
         ).fetchone()
     if not row:
         return None
-    return {"run_id": row[0], "thread_id": row[1], "status": row[2]}
+    return {
+        "run_id": row[0],
+        "thread_id": row[1],
+        "status": row[2],
+        "commit_sha": row[3],
+    }
 
 
 def get_or_create_user(google_id: str, email: str, name: str = "", picture: str = "") -> int:

@@ -134,6 +134,32 @@ def validate_repo_url(url: str) -> str:
     return clean
 
 
+def get_remote_head_sha(url: str, branch: str | None = None) -> str:
+    clean_url = url if url.rstrip("/").endswith(".git") else validate_repo_url(url)
+    ref = f"refs/heads/{branch}" if branch else "HEAD"
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", clean_url, ref],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise IngestError("Checking the remote commit timed out") from exc
+    except (OSError, subprocess.CalledProcessError) as exc:
+        stderr = getattr(exc, "stderr", "") or ""
+        raise IngestError(
+            f"Unable to check the remote commit: {stderr.strip()[:400]}"
+        ) from exc
+
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and fields[1] == ref:
+            return fields[0]
+    raise IngestError(f"No remote commit found for {ref}")
+
+
 def contains_secret(text: str) -> bool:
     return any(pattern.search(text) for pattern in SECRET_PATTERNS)
 

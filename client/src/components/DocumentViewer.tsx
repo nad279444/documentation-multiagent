@@ -122,7 +122,7 @@ export default function DocumentViewer({
   };
 
   return (
-    <div className="space-y-4 w-full h-full flex flex-col">
+    <div className="space-y-4 w-full flex flex-col">
       {/* Folder Header Toolbar */}
       <div className="bg-slate-900 text-white p-3 rounded-2xl border border-slate-800 shadow-sm flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3 pl-2">
@@ -224,7 +224,7 @@ export default function DocumentViewer({
         ) : (
           <article
             id="document-content"
-            className="markdown-body prose prose-slate max-w-none flex-1 min-h-0 overflow-y-auto"
+            className="markdown-body prose prose-slate max-w-none flex-1 min-h-0"
           >
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
