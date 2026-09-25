@@ -4,6 +4,12 @@ COPY requirements.txt .
 RUN pip install --user -r requirements.txt
 
 FROM python:3.11-slim
+# The ingestion path shells out to git: `git clone` to fetch the repo snapshot
+# and `git ls-remote` to check whether the cached commit is still current.
+# python:3.11-slim has no git, so it must be installed in the runtime stage.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /root/.local /root/.local
 COPY . .

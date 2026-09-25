@@ -147,6 +147,11 @@ def get_remote_head_sha(url: str, branch: str | None = None) -> str:
         )
     except subprocess.TimeoutExpired as exc:
         raise IngestError("Checking the remote commit timed out") from exc
+    except FileNotFoundError as exc:
+        raise IngestError(
+            "The 'git' executable is missing from this container image; "
+            "the cache freshness check cannot run"
+        ) from exc
     except (OSError, subprocess.CalledProcessError) as exc:
         stderr = getattr(exc, "stderr", "") or ""
         raise IngestError(
@@ -179,6 +184,12 @@ def clone_repo(url: str, branch: str | None = None) -> ClonedRepo:
 
     try:
         subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+    except FileNotFoundError as exc:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise IngestError(
+            "The 'git' executable is missing from this container image; "
+            "repository ingestion cannot run"
+        ) from exc
     except subprocess.TimeoutExpired as exc:
         shutil.rmtree(workdir, ignore_errors=True)
         raise IngestError("Cloning timed out after 300s") from exc
