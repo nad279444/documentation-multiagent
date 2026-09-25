@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://documentation-multiagent-qnzpfn7mea-uc.a.run.app/:path*"
+    }
+  ]
+}
