@@ -136,7 +136,7 @@ LANGSMITH_API_KEY=lsv2_...           # optional tracing + eval feedback
 LANGSMITH_PROJECT=doc-agent
 ```
 
-Optional tunables: `LLM_MODEL` (default `gpt-4o-mini`), `EMBEDDING_MODEL`
+Optional tunables: `LLM_MODEL` (default `gpt-6-luna`), `EMBEDDING_MODEL`
 (default `text-embedding-3-small`), `MAX_REPO_MB` (200), `MAX_FILES` (2000),
 `MAX_EVAL_RETRIES` (2), `RETRIEVAL_TOP_K` (8).
 

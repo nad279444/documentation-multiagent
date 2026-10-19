@@ -16,8 +16,8 @@ load_dotenv()
 class Settings:
     # --- LLM / embeddings -------------------------------------------------
     openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
-    # Budget-tier model: keeps the $5 development budget covering dozens of runs.
-    llm_model: str = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    # Efficient GPT-6 tier: strong quality at the lowest per-token cost.
+    llm_model: str = os.environ.get("LLM_MODEL", "gpt-6-luna")
     embedding_model: str = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
     embedding_dimensions: int = int(os.environ.get("EMBEDDING_DIMENSIONS", "1536"))
 

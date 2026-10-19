@@ -24,6 +24,15 @@ BASE_SYSTEM = (
 
 _llms: dict[str, ChatOpenAI] = {}
 
+# Reasoning-capable models reject temperature/top_p unless reasoning effort is
+# explicitly "none". These tasks are deterministic by design, so reasoning is
+# disabled for them. Older chat models (gpt-4o*) must NOT receive the param.
+_REASONING_PREFIXES = ("gpt-5", "gpt-6", "o1", "o3", "o4")
+
+
+def _is_reasoning_model(name: str) -> bool:
+    return name.lower().startswith(_REASONING_PREFIXES)
+
 
 def get_llm(
     temperature: float = 0.0, model: str | None = None, max_tokens: int | None = None
@@ -31,18 +40,22 @@ def get_llm(
     """Model routing: callers pass a cheap model for narrow, mechanical tasks."""
     settings = get_settings()
     name = model or settings.llm_model
-    key = f"{name}:{temperature}:{max_tokens}"
+    reasoning_effort = "none" if _is_reasoning_model(name) else None
+    key = f"{name}:{temperature}:{max_tokens}:{reasoning_effort}"
     if key not in _llms:
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is not set")
-        _llms[key] = ChatOpenAI(
-            model=name,
-            temperature=temperature,
-            api_key=SecretStr(settings.openai_api_key),
-            timeout=120,
-            max_retries=2,
-            max_tokens=max_tokens,
-        )
+        kwargs: dict = {
+            "model": name,
+            "temperature": temperature,
+            "api_key": SecretStr(settings.openai_api_key),
+            "timeout": 120,
+            "max_retries": 2,
+            "max_tokens": max_tokens,
+        }
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
+        _llms[key] = ChatOpenAI(**kwargs)
     return _llms[key]
 
 
