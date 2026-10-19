@@ -166,6 +166,8 @@ def _check_schema(doc: str, template: list[str] | None) -> EvalCheckDict:
         problems.append("no top-level heading")
     if doc.count("```") % 2 != 0:
         problems.append("unbalanced code fences")
+    if re.search(r"^```[ \t]+\S", doc, re.M):
+        problems.append("text after a bare code fence (fence not closed)")
 
     for block in re.findall(r"```mermaid\n(.*?)```", doc, re.S):
         first = block.strip().split("\n")[0] if block.strip() else ""

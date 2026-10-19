@@ -1,10 +1,32 @@
-import { Children, isValidElement, useEffect, useRef, useState } from "react";
+import { Children, isValidElement, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import mermaid from "mermaid";
 
 interface MermaidBlockProps {
   code: string;
+}
+
+// A code fence may only be followed by whitespace to close the block. The
+// generator sometimes appends grounding citations to it ("``` [ref:x]"), which
+// CommonMark treats as more code — the fence (and everything after) then leaks
+// into the block. Push those citations onto their own line so the block closes.
+const FENCE_WITH_CITATIONS =
+  /^(\s*`{3,}[a-zA-Z0-9_-]*)[ \t]*(\[ref:[^\]]+\](?:[ \t]*\[ref:[^\]]+\])*)[ \t]*$/gm;
+
+function normalizeDocument(md: string): string {
+  return md.replace(FENCE_WITH_CITATIONS, "$1\n$2");
+}
+
+// Defense in depth: strip any fence markers or citations that still make it
+// into a Mermaid source before handing it to the renderer.
+function sanitizeMermaidCode(raw: string): string {
+  return raw
+    .split("\n")
+    .filter((line) => !/^\s*`{3,}/.test(line))
+    .join("\n")
+    .replace(/\[ref:[^\]]+\]/g, "")
+    .trim();
 }
 
 function getMermaidCodeFromPre(children: React.ReactNode) {
@@ -17,7 +39,7 @@ function getMermaidCodeFromPre(children: React.ReactNode) {
   };
   if (!props.className?.includes("language-mermaid")) return null;
 
-  return String(props.children).replace(/\n$/, "");
+  return sanitizeMermaidCode(String(props.children)) || null;
 }
 function MermaidBlock({ code }: MermaidBlockProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -115,6 +137,8 @@ export default function DocumentViewer({
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(content);
+
+  const renderedContent = useMemo(() => normalizeDocument(content), [content]);
 
   const handleSave = () => {
     onSave(draft);
@@ -247,7 +271,7 @@ export default function DocumentViewer({
                 },
               }}
             >
-              {content}
+              {renderedContent}
             </ReactMarkdown>
           </article>
         )}
