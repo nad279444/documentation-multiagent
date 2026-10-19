@@ -407,13 +407,26 @@ def append_chat_message(
         )
 
 
-def get_chat_messages(user_id: int, repo_id: int) -> list[dict]:
-    """Full persisted conversation for a workspace, oldest first."""
+def get_chat_messages(
+    user_id: int, repo_id: int, limit: int | None = None
+) -> list[dict]:
+    """Persisted conversation for a workspace, oldest first.
+
+    `limit` returns only the most recent N messages (still oldest-first) so
+    callers can bound the memory handed to the LLM.
+    """
     with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT role, content, edited FROM chat_messages WHERE user_id = %s AND repo_id = %s ORDER BY id",
-            (user_id, repo_id),
-        ).fetchall()
+        if limit is not None and limit > 0:
+            rows = conn.execute(
+                "SELECT role, content, edited FROM chat_messages WHERE user_id = %s AND repo_id = %s ORDER BY id DESC LIMIT %s",
+                (user_id, repo_id, limit),
+            ).fetchall()
+            rows = list(reversed(rows))
+        else:
+            rows = conn.execute(
+                "SELECT role, content, edited FROM chat_messages WHERE user_id = %s AND repo_id = %s ORDER BY id",
+                (user_id, repo_id),
+            ).fetchall()
     return [
         {"role": r[0], "content": r[1], "edited": r[2]} for r in rows
     ]

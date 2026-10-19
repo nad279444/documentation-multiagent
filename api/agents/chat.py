@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 CHAT_SYSTEM = (
     "You are a documentation editor. The user will ask you to revise a generated document. "
     "You have tools to edit sections, rewrite content, and answer questions about the document. "
+    "Use the earlier turns in the conversation as context — resolve follow-up references "
+    "like 'that section' or 'make it shorter' against what was already discussed. "
     "ALWAYS use the edit_document tool when making changes — never just describe what to change. "
     "Keep the document's structure and formatting intact. "
     "Never refuse a user request in your own words — the calling code handles refusals. "
@@ -53,7 +55,38 @@ REFUSAL_REPLY = (
 )
 
 
-def _respond(user_message: str, document: str, source_context: str) -> tuple[str, bool]:
+# Memory budget: only the most recent turns are replayed, each truncated, so a
+# long thread cannot blow up prompt cost or latency.
+MEMORY_MAX_MESSAGES = 6
+MEMORY_USER_CHARS = 2000
+MEMORY_ASSISTANT_CHARS = 4000
+
+
+def _history_messages(
+    history: list[dict[str, str]] | None,
+) -> list[HumanMessage | AIMessage]:
+    """Convert persisted workspace turns into LangChain messages (oldest first)."""
+    if not history:
+        return []
+    messages: list[HumanMessage | AIMessage] = []
+    for turn in history[-MEMORY_MAX_MESSAGES:]:
+        role = turn.get("role")
+        content = (turn.get("content") or "").strip()
+        if not content:
+            continue
+        if role == "user":
+            messages.append(HumanMessage(content=content[:MEMORY_USER_CHARS]))
+        elif role == "assistant":
+            messages.append(AIMessage(content=content[:MEMORY_ASSISTANT_CHARS]))
+    return messages
+
+
+def _respond(
+    user_message: str,
+    document: str,
+    source_context: str,
+    history: list[dict[str, str]] | None = None,
+) -> tuple[str, bool]:
     """Single LLM call that both gates and answers.
 
     Guardrail + answer folded into one request: the model answers the question
@@ -82,7 +115,13 @@ def _respond(user_message: str, document: str, source_context: str) -> tuple[str
         "Do not write your own refusal message under any circumstances.\n\n"
         f"User message: {user_message}"
     )
-    result = llm.invoke([SystemMessage(content=CHAT_SYSTEM), HumanMessage(content=prompt)])
+    result = llm.invoke(
+        [
+            SystemMessage(content=CHAT_SYSTEM),
+            *_history_messages(history),
+            HumanMessage(content=prompt),
+        ]
+    )
     reply = result.content.strip()
     if reply.upper().startswith(OFF_TOPIC_MARKER):
         logger.info("Guardrail refusal for message='%s'", user_message[:80])
@@ -113,7 +152,12 @@ def _looks_like_self_refusal(reply: str) -> bool:
     return any(p in lowered for p in _SELF_REFUSAL_PATTERNS)
 
 
-def _apply_edit(document: str, instruction: str, section: str | None) -> str:
+def _apply_edit(
+    document: str,
+    instruction: str,
+    section: str | None,
+    history: list[dict[str, str]] | None = None,
+) -> str:
     """Use the LLM to apply an edit to the document."""
     llm = get_llm(temperature=0.2, max_tokens=EDIT_MAX_TOKENS)
 
@@ -133,7 +177,13 @@ def _apply_edit(document: str, instruction: str, section: str | None) -> str:
             "Keep all other sections exactly the same."
         )
 
-    result = llm.invoke([SystemMessage(content=CHAT_SYSTEM), HumanMessage(content=prompt)])
+    result = llm.invoke(
+        [
+            SystemMessage(content=CHAT_SYSTEM),
+            *_history_messages(history),
+            HumanMessage(content=prompt),
+        ]
+    )
     edited = result.content.strip()
     # Strip markdown code fences if the LLM wrapped the output
     if edited.startswith("```"):
@@ -153,6 +203,10 @@ def chat(
 
     1. Intent detection — edits route to _apply_edit, everything else answers.
     2. A single LLM call gates on-topic and answers (off-topic returns a refusal).
+
+    `history` is the persisted workspace conversation (oldest first); the last
+    few turns are replayed to the model so follow-up questions and edits like
+    "now shorten that section" resolve against what was already discussed.
     """
     # --- Intent detection ---
     lower_msg = user_message.lower()
@@ -176,10 +230,10 @@ def chat(
         target_section = next(g for g in section_match.groups() if g)
 
     if wants_edit:
-        reply, on_topic = _respond(user_message, document, source_context)
+        reply, on_topic = _respond(user_message, document, source_context, history)
         if not on_topic:
             return ChatResponse(reply=reply, document=document, edited=False)
-        edited_doc = _apply_edit(document, user_message, target_section)
+        edited_doc = _apply_edit(document, user_message, target_section, history)
         return ChatResponse(
             reply="Done. The document has been updated.",
             document=edited_doc,
@@ -187,5 +241,5 @@ def chat(
         )
 
     # Default: answer question (guardrail folded into the same call)
-    reply, on_topic = _respond(user_message, document, source_context)
+    reply, on_topic = _respond(user_message, document, source_context, history)
     return ChatResponse(reply=reply, document=document, edited=False)

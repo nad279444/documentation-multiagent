@@ -46,11 +46,14 @@ logger = logging.getLogger(__name__)
 
 _graph = None
 
-# In-memory chat reply cache: (run_id, message, document) -> (timestamp, response).
+# In-memory chat reply cache: (run_id, message, document, history) -> (timestamp, response).
 # Repeated identical questions skip the retrieval + LLM round trip entirely.
-_chat_cache: dict[tuple[int, str, str], tuple[float, "ChatResponseModel"]] = {}
+_chat_cache: dict[tuple[int, str, str, tuple], tuple[float, "ChatResponseModel"]] = {}
 _CHAT_CACHE_MAX = 128
 _CHAT_CACHE_TTL_SECONDS = 600
+
+# How many recent workspace turns are replayed to the agent as memory.
+CHAT_MEMORY_MESSAGES = 6
 
 # Per-run SSE event buffers. The background pipeline writes stage/token/done
 # events here and GET /runs/{id}/stream reads them, so the frontend sees
@@ -486,9 +489,15 @@ def chat_with_document(
 
     document, repo_id, _, commit_sha = row
 
-    # Cache hit: exact same question on the same document version.
+    # Recent turns of the workspace thread give the agent conversational
+    # memory. The current message is persisted only after the reply is built,
+    # so it is not part of this window.
+    history = get_chat_messages(user["id"], repo_id, limit=CHAT_MEMORY_MESSAGES)
+
+    # Cache hit: exact same question in the same conversational context.
     now = time.time()
-    cache_key = (run_id, req.message, document)
+    history_key = tuple((m["role"], m["content"][:200]) for m in history)
+    cache_key = (run_id, req.message, document, history_key)
     cached = _chat_cache.get(cache_key)
     if cached and now - cached[0] < _CHAT_CACHE_TTL_SECONDS:
         logger.info("Chat cache hit for run %s: '%s'", run_id, req.message[:80])
@@ -512,7 +521,10 @@ def chat_with_document(
     from agents.chat import chat as agent_chat
 
     result = agent_chat(
-        user_message=req.message, document=document, source_context=source_context
+        user_message=req.message,
+        document=document,
+        history=history,
+        source_context=source_context,
     )
 
     # Persist the conversation in the workspace thread (user + repo), shared
