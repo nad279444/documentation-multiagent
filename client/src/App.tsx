@@ -481,7 +481,7 @@ const handleNewDoc = () => {
                 </p>
               </div>
 
-              <div className="grid grid-cols-3 gap-3 max-w-lg text-xs sm:text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-lg text-xs sm:text-sm">
                 <div className="rounded-xl border border-white/70 bg-white/60 px-3 py-3 shadow-sm backdrop-blur">
                   <p className="font-bold text-slate-900">1. Source</p>
                   <p className="mt-1 text-slate-500">Paste a GitHub repo</p>
@@ -497,7 +497,7 @@ const handleNewDoc = () => {
               </div>
             </section>
 
-            <section className="relative min-h-0 lg:min-h-[560px] flex items-center justify-center">
+            <section className="relative min-h-0 lg:min-h-[560px] flex flex-col-reverse lg:flex-row items-center justify-center">
               <div className="absolute inset-x-8 top-8 bottom-8 rounded-[2rem] bg-white/45 border border-white/80 shadow-2xl shadow-slate-900/10 backdrop-blur-xl" />
               <div className="document-handoff-scene" aria-hidden="true">
                 <img
@@ -523,7 +523,7 @@ const handleNewDoc = () => {
                 <div className="handoff-shadow" />
               </div>
 
-              <div className="relative z-10 self-end w-full max-w-sm mb-10 bg-white rounded-2xl border border-slate-200/80 shadow-2xl shadow-slate-900/10 p-7">
+              <div className="relative z-10 lg:self-end w-full max-w-sm mb-10 bg-white rounded-2xl border border-slate-200/80 shadow-2xl shadow-slate-900/10 p-7">
                 <div className="mb-6 text-center">
                   <h2 className="text-2xl font-bold tracking-tight text-slate-950">
                     Welcome back
@@ -785,7 +785,7 @@ const handleNewDoc = () => {
               ? "Endpoints, payloads, and integration details"
               : "System structure, modules, and data flow";
           return (
-            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_24rem] gap-3 lg:h-[calc((100vh-6rem)*0.7)] min-h-0 animate-document-unfold">
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_24rem] gap-3 lg:h-[calc(100vh-5rem)] min-h-0 animate-document-unfold">
               <section className="min-w-0 flex flex-col gap-3 lg:overflow-hidden">
                 <div className="bg-white border border-slate-200/80 rounded-2xl shadow-document px-4 py-3 sm:px-5">
                   <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
