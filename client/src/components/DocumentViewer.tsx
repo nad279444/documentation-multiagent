@@ -1,4 +1,5 @@
 import { Children, isValidElement, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import mermaid from "mermaid";
@@ -45,6 +46,22 @@ function getMermaidCodeFromPre(children: React.ReactNode) {
 function MermaidBlock({ code }: MermaidBlockProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [svg, setSvg] = useState("");
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setExpanded(false);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [expanded]);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,6 +134,7 @@ function MermaidBlock({ code }: MermaidBlockProps) {
           svgEl.style.height = "auto";
         }
         bindFunctions?.(el);
+        setSvg(svg);
         setError(null);
       } catch (e) {
         if (!cancelled) {
@@ -132,6 +150,10 @@ function MermaidBlock({ code }: MermaidBlockProps) {
     };
   }, [code]);
 
+  const openExpanded = () => {
+    if (svg) setExpanded(true);
+  };
+
   return (
     <div className="my-6 -mx-2 sm:-mx-6">
       {error ? (
@@ -140,11 +162,93 @@ function MermaidBlock({ code }: MermaidBlockProps) {
           <div className="mt-2 font-sans">Mermaid error: {error}</div>
         </pre>
       ) : (
-        <div
-          ref={ref}
-          className="mermaid-diagram-canvas w-full overflow-x-auto bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-sm"
-        />
+        <div className="group relative">
+          <div
+            ref={ref}
+            role="button"
+            tabIndex={0}
+            title="Click to expand diagram"
+            aria-label="Expand diagram"
+            onClick={openExpanded}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                openExpanded();
+              }
+            }}
+            className="mermaid-diagram-canvas w-full overflow-x-auto bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-sm cursor-zoom-in focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/50"
+          />
+          <button
+            type="button"
+            onClick={openExpanded}
+            aria-label="Expand diagram"
+            className="absolute right-3 top-3 flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white/95 px-2.5 py-1.5 text-xs font-semibold text-slate-600 shadow-sm opacity-0 transition hover:text-sky-700 hover:border-sky-200 group-hover:opacity-100 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/50"
+          >
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
+              />
+            </svg>
+            Expand
+          </button>
+        </div>
       )}
+
+      {expanded &&
+        svg &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Expanded diagram"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm"
+            onClick={() => setExpanded(false)}
+          >
+            <div
+              className="relative flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Diagram
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setExpanded(false)}
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/50"
+                >
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                  Close
+                </button>
+              </div>
+              <div
+                className="mermaid-diagram-canvas mermaid-modal-canvas overflow-auto bg-white p-4 sm:p-6"
+                dangerouslySetInnerHTML={{ __html: svg }}
+              />
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

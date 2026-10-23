@@ -446,6 +446,16 @@
     stroke-width: 1.5px !important;
 }
 
+/* Expanded lightbox: fit the whole diagram inside the modal. */
+.mermaid-modal-canvas svg {
+    width: auto !important;
+    height: auto !important;
+    max-width: 100% !important;
+    max-height: 78vh !important;
+    min-width: 0 !important;
+    background: #ffffff;
+}
+
 /* Authenticated workspace animated background */
 .app-gradient-shell {
     position: relative;
