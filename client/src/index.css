@@ -397,6 +397,21 @@
     color: #0f172a;
 }
 
+/* Accent borders on nodes and softly-tinted container groups. Text stays dark
+   so labels keep strong contrast against the light fills. */
+.mermaid-diagram-canvas .node rect,
+.mermaid-diagram-canvas .node polygon,
+.mermaid-diagram-canvas .node circle,
+.mermaid-diagram-canvas .node ellipse {
+    stroke-width: 1.5px !important;
+}
+
+.mermaid-diagram-canvas .cluster rect {
+    rx: 10px;
+    ry: 10px;
+    stroke-width: 1.5px !important;
+}
+
 /* Authenticated workspace animated background */
 .app-gradient-shell {
     position: relative;
