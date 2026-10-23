@@ -62,15 +62,16 @@ function MermaidBlock({ code }: MermaidBlockProps) {
             background: "#ffffff",
             fontFamily: "inherit",
             fontSize: "14px",
-            // Light container fills + saturated borders, with dark text on top.
+            // Three accent colours (indigo, cyan, emerald) on light fills; all
+            // text and connector lines use neutral slate for contrast.
             primaryColor: "#eef2ff",
             primaryTextColor: "#1e293b",
             primaryBorderColor: "#6366f1",
             secondaryColor: "#ecfeff",
-            secondaryTextColor: "#155e75",
+            secondaryTextColor: "#1e293b",
             secondaryBorderColor: "#0891b2",
             tertiaryColor: "#f0fdf4",
-            tertiaryTextColor: "#166534",
+            tertiaryTextColor: "#1e293b",
             tertiaryBorderColor: "#16a34a",
             mainBkg: "#eef2ff",
             nodeBorder: "#6366f1",
@@ -80,7 +81,7 @@ function MermaidBlock({ code }: MermaidBlockProps) {
             lineColor: "#475569",
             defaultLinkColor: "#475569",
             clusterBkg: "#f8fafc",
-            clusterBorder: "#93c5fd",
+            clusterBorder: "#a5b4fc",
             edgeLabelBackground: "#ffffff",
             // Sequence-diagram elements share the same palette.
             actorBkg: "#eef2ff",
@@ -89,12 +90,12 @@ function MermaidBlock({ code }: MermaidBlockProps) {
             signalColor: "#475569",
             signalTextColor: "#1e293b",
             labelBoxBkgColor: "#f8fafc",
-            labelBoxBorderColor: "#93c5fd",
+            labelBoxBorderColor: "#a5b4fc",
             labelTextColor: "#1e293b",
             loopTextColor: "#1e293b",
-            noteBkgColor: "#fefce8",
-            noteBorderColor: "#eab308",
-            noteTextColor: "#422006",
+            noteBkgColor: "#f0fdf4",
+            noteBorderColor: "#16a34a",
+            noteTextColor: "#1e293b",
           },
         });
         // Force left-to-right flow so wide data-flow diagrams read horizontally.

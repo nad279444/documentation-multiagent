@@ -402,8 +402,42 @@
 .mermaid-diagram-canvas .node rect,
 .mermaid-diagram-canvas .node polygon,
 .mermaid-diagram-canvas .node circle,
-.mermaid-diagram-canvas .node ellipse {
+.mermaid-diagram-canvas .node ellipse,
+.mermaid-diagram-canvas .node path {
     stroke-width: 1.5px !important;
+}
+
+.mermaid-diagram-canvas .node rect {
+    rx: 8px !important;
+    ry: 8px !important;
+}
+
+/* Cycle nodes through the three accents so adjacent boxes stay distinct. */
+.mermaid-diagram-canvas .nodes > .node:nth-child(3n + 1) rect,
+.mermaid-diagram-canvas .nodes > .node:nth-child(3n + 1) polygon,
+.mermaid-diagram-canvas .nodes > .node:nth-child(3n + 1) circle,
+.mermaid-diagram-canvas .nodes > .node:nth-child(3n + 1) ellipse,
+.mermaid-diagram-canvas .nodes > .node:nth-child(3n + 1) path {
+    fill: #eef2ff !important;
+    stroke: #6366f1 !important;
+}
+
+.mermaid-diagram-canvas .nodes > .node:nth-child(3n + 2) rect,
+.mermaid-diagram-canvas .nodes > .node:nth-child(3n + 2) polygon,
+.mermaid-diagram-canvas .nodes > .node:nth-child(3n + 2) circle,
+.mermaid-diagram-canvas .nodes > .node:nth-child(3n + 2) ellipse,
+.mermaid-diagram-canvas .nodes > .node:nth-child(3n + 2) path {
+    fill: #ecfeff !important;
+    stroke: #0891b2 !important;
+}
+
+.mermaid-diagram-canvas .nodes > .node:nth-child(3n) rect,
+.mermaid-diagram-canvas .nodes > .node:nth-child(3n) polygon,
+.mermaid-diagram-canvas .nodes > .node:nth-child(3n) circle,
+.mermaid-diagram-canvas .nodes > .node:nth-child(3n) ellipse,
+.mermaid-diagram-canvas .nodes > .node:nth-child(3n) path {
+    fill: #f0fdf4 !important;
+    stroke: #16a34a !important;
 }
 
 .mermaid-diagram-canvas .cluster rect {
