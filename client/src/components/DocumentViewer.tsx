@@ -2,6 +2,7 @@ import { Children, isValidElement, useEffect, useMemo, useRef, useState } from "
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import mermaid from "mermaid";
+import { stripCitations } from "../lib/text";
 
 interface MermaidBlockProps {
   code: string;
@@ -138,7 +139,10 @@ export default function DocumentViewer({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(content);
 
-  const renderedContent = useMemo(() => normalizeDocument(content), [content]);
+  const renderedContent = useMemo(
+    () => stripCitations(normalizeDocument(content)),
+    [content],
+  );
 
   const handleSave = () => {
     onSave(draft);

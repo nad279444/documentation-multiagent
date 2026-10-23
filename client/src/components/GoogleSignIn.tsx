@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { setToken, verifyToken } from "../lib/auth";
+import LoadingStages from "./LoadingStages";
+
+const SIGN_IN_STAGES = [
+  "Verifying your Google account...",
+  "Securing your workspace session...",
+  "Opening your documentation workspace...",
+  "Fetching your most recent documents...",
+  "Preparing your document sheet...",
+] as const;
 
 interface Props {
   onSuccess: (userInfo: any) => void;
@@ -124,9 +133,11 @@ export default function GoogleSignIn({ onSuccess, onError }: Props) {
           ? "border-sky-200 bg-sky-50 text-sky-800"
           : "border-slate-200 bg-slate-50 text-slate-500"
       }`}>
-        {signingIn
-          ? "Please wait patiently while we sign you in."
-          : "After selecting your Google account, please wait patiently while we verify your access."}
+        {signingIn ? (
+          <LoadingStages messages={SIGN_IN_STAGES} />
+        ) : (
+          "Select your Google account to open your documentation workspace."
+        )}
       </div>
     </div>
   );

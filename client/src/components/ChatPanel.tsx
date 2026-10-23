@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { clearChat, loadChatHistory, sendChat } from "../lib/api";
+import { stripCitations, stripCitationsForStream } from "../lib/text";
 
 interface Message {
   role: "user" | "assistant";
@@ -39,7 +40,7 @@ function TypewriterText({
     return () => clearInterval(iv);
   }, [text, chunk, speed]);
 
-  return <>{text.slice(0, length)}</>;
+  return <>{stripCitationsForStream(text.slice(0, length))}</>;
 }
 
 export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
@@ -273,7 +274,7 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
                   {animating ? (
                     <TypewriterText key={i} text={msg.content} />
                   ) : (
-                    msg.content
+                    stripCitations(msg.content)
                   )}
                   {animating && (
                     <span className="inline-block w-1 h-3 bg-sky-500 animate-pulse align-middle ml-0.5" />

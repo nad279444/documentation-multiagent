@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getRecentRuns, getRun, streamRun, submitGeneration } from "./lib/api";
 import { clearToken, getCurrentUser, getToken } from "./lib/auth";
+import { stripCitationsForStream } from "./lib/text";
 import SubmitForm from "./components/SubmitForm";
 import DocumentViewer from "./components/DocumentViewer";
 import ChatPanel from "./components/ChatPanel";
 import GoogleSignIn from "./components/GoogleSignIn";
+import LoadingStages from "./components/LoadingStages";
 import heroImage from "./assets/hero.png";
 import { toPng } from "html-to-image";
 import jsPDF from "jspdf";
@@ -44,6 +46,13 @@ const describeMissingDoc = (runs: DocRun[]): string => {
   }
   return "Generation completed without any output";
 };
+
+const SESSION_RESTORE_STAGES = [
+  "Checking your saved session...",
+  "Opening your documentation workspace...",
+  "Loading your most recent documents...",
+  "Preparing your document sheet...",
+] as const;
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>("login");
@@ -438,7 +447,39 @@ const handleNewDoc = () => {
   const activeRun = runs.find((r) => r.docType === activeDoc);
 
   if (loading) {
-    return <div className="p-4">Loading...</div>;
+    return (
+      <div className="min-h-screen overflow-hidden bg-[#eef5f8] text-slate-900 relative flex items-center justify-center px-6">
+        <div className="login-background-grid" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(14,165,233,0.22),transparent_30%),radial-gradient(circle_at_80%_10%,rgba(124,58,237,0.16),transparent_28%),linear-gradient(135deg,rgba(255,255,255,0.92),rgba(226,232,240,0.72))]" />
+        <div className="relative z-10 w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white/90 p-7 text-center shadow-2xl shadow-slate-900/10 backdrop-blur">
+          <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-100 text-sky-600">
+            <svg
+              className="h-6 w-6 animate-spin"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
+            </svg>
+          </div>
+          <h2 className="text-lg font-bold tracking-tight text-slate-950">
+            Opening your workspace
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Picking up where you left off.
+          </p>
+          <LoadingStages
+            messages={SESSION_RESTORE_STAGES}
+            className="mt-4 text-sm font-medium text-sky-800"
+          />
+        </div>
+      </div>
+    );
   }
 
   if (phase === "login") {
@@ -550,7 +591,11 @@ const handleNewDoc = () => {
   }
 
   return (
-    <div className="app-gradient-shell min-h-screen flex flex-col font-sans text-slate-800 antialiased selection:bg-sky-100 selection:text-sky-900">
+    <div
+      className={`app-gradient-shell min-h-screen flex flex-col font-sans text-slate-800 antialiased selection:bg-sky-100 selection:text-sky-900${
+        phase === "view" ? " lg:h-screen lg:min-h-0 lg:overflow-hidden" : ""
+      }`}
+    >
       {/* Top Navigation Header */}
       <header className="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-30 shadow-md">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
@@ -672,7 +717,7 @@ const handleNewDoc = () => {
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl mx-auto px-2 sm:px-3 py-2 w-full flex flex-col">
+      <main className="flex-1 min-h-0 max-w-7xl mx-auto px-2 sm:px-3 py-2 w-full flex flex-col">
         {error && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl shadow-sm flex items-center justify-between animate-slide-down">
             <div className="flex items-center gap-3">
@@ -765,7 +810,7 @@ const handleNewDoc = () => {
                     Live draft
                   </p>
                   <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap break-words rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600 font-mono">
-                    {liveDraft[activeDoc]}
+                    {stripCitationsForStream(liveDraft[activeDoc])}
                     <span className="inline-block w-1.5 h-3.5 bg-sky-500 animate-pulse align-middle" />
                   </pre>
                 </div>
@@ -785,8 +830,8 @@ const handleNewDoc = () => {
               ? "Endpoints, payloads, and integration details"
               : "System structure, modules, and data flow";
           return (
-            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_24rem] gap-3 lg:h-[calc(100vh-5rem)] min-h-0 animate-document-unfold">
-              <section className="min-w-0 flex flex-col gap-3 lg:overflow-hidden">
+            <div className="flex flex-col lg:flex-row gap-3 min-h-0 lg:flex-1 animate-document-unfold">
+              <section className="min-w-0 min-h-0 flex flex-col gap-3 lg:flex-1 lg:overflow-hidden">
                 <div className="bg-white border border-slate-200/80 rounded-2xl shadow-document px-4 py-3 sm:px-5">
                   <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                     <div className="min-w-0">
@@ -913,7 +958,7 @@ const handleNewDoc = () => {
                 </div>
               </section>
 
-              <aside className="w-full min-h-0 shrink-0 h-[72vh] lg:h-full">
+              <aside className="w-full min-h-0 shrink-0 h-[72vh] lg:h-auto lg:w-96">
                 <ChatPanel
                   runId={activeRunRun.runId}
                   onDocumentUpdate={(doc) =>
