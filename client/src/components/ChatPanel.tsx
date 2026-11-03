@@ -249,7 +249,7 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
           </div>
         )}
 
-        {!historyLoading && editMode && (
+        {!historyLoading && editMode && messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center py-10 px-4">
             <div className="w-10 h-10 rounded-full bg-sky-50 text-sky-600 flex items-center justify-center mx-auto mb-3 border border-sky-100">
               <svg
@@ -270,8 +270,9 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
               Editing canvas
             </p>
             <p className="text-xs text-slate-400 leading-relaxed max-w-[230px]">
-              Describe what you want to change below. The document updates as
-              soon as you send. Click Q&amp;A to return to your conversation.
+              Describe what you want to change below. Your request and the
+              result appear here, and the document updates when the edit is
+              applied. Click Q&amp;A to return to your conversation.
             </p>
           </div>
         )}
@@ -303,7 +304,7 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
           </div>
         )}
 
-        {!editMode && messages.map((msg, i) => {
+        {messages.map((msg, i) => {
           const animating = msg.role === "assistant" && i === typingIndex && msg.content.length > 0;
           return (
             <div
@@ -365,6 +366,12 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
 
       {/* Chat Input Field */}
       <div className="p-3 bg-white border-t border-slate-200/80">
+        {editMode && (
+          <p className="mb-2 flex items-center gap-1.5 text-[10px] text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-2 py-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
+            Edit mode: each message is applied directly to the document.
+          </p>
+        )}
         <form
           onSubmit={(e) => {
             e.preventDefault();
