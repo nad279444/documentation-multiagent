@@ -181,11 +181,15 @@ export interface ChatResponse {
   edited: boolean;
 }
 
-export async function sendChat(runId: number, message: string): Promise<ChatResponse> {
+export async function sendChat(
+  runId: number,
+  message: string,
+  mode: 'auto' | 'edit' = 'auto',
+): Promise<ChatResponse> {
   const res = await fetch(`${BASE}/runs/${runId}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, mode }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));

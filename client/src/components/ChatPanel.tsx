@@ -48,6 +48,8 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // One-shot edit mode: the next message is sent as a forced edit, then resets.
+  const [editMode, setEditMode] = useState(false);
   // Index of the assistant message currently being typed out (null = show full).
   const [typingIndex, setTypingIndex] = useState<number | null>(null);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
@@ -130,6 +132,7 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
     draftRef.current = "";
     setHistoryIndex(null);
     setTypingIndex(null);
+    setEditMode(false);
     try {
       await clearChat(runId);
     } catch {
@@ -141,7 +144,9 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
     const text = input.trim();
     if (!text || loading) return;
 
+    const forceEdit = editMode;
     setInput("");
+    setEditMode(false);
     setHistoryIndex(null);
     draftRef.current = "";
     historyRef.current = [...historyRef.current, text];
@@ -153,7 +158,7 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
     setLoading(true);
 
     try {
-      const res = await sendChat(runId, text);
+      const res = await sendChat(runId, text, forceEdit ? "edit" : "auto");
       const reply: Message = {
         role: "assistant",
         content: res.reply,
@@ -206,6 +211,24 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
           <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
             Run #{runId}
           </span>
+          <button
+            type="button"
+            onClick={() => setEditMode((v) => !v)}
+            disabled={loading || historyLoading}
+            aria-pressed={editMode}
+            title={
+              editMode
+                ? "Edit mode on — your next message changes the document"
+                : "Turn on edit mode to change the document directly"
+            }
+            className={`text-[10px] font-mono px-2 py-0.5 rounded border transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+              editMode
+                ? "bg-sky-500 text-white border-sky-400 hover:bg-sky-400"
+                : "bg-slate-800 text-slate-400 border-slate-700 hover:text-sky-300 hover:border-sky-400/50"
+            }`}
+          >
+            {editMode ? "Editing" : "Edit"}
+          </button>
           <button
             type="button"
             onClick={handleClear}
@@ -316,6 +339,11 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
 
       {/* Chat Input Field */}
       <div className="p-3 bg-white border-t border-slate-200/80">
+        {editMode && (
+          <p className="mb-2 text-[10px] text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-2 py-1">
+            Edit mode: your next message will modify the document.
+          </p>
+        )}
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -327,7 +355,9 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask or request edits..."
+            placeholder={
+              editMode ? "Describe the change..." : "Ask or request edits..."
+            }
             disabled={loading || historyLoading}
             className="flex-1 px-3.5 py-2.5 bg-slate-50 border border-slate-300/80 rounded-xl text-xs focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 outline-none disabled:opacity-50 transition-all"
           />

@@ -13,6 +13,7 @@ import time
 import uuid
 from collections import deque
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from auth import get_current_user
 from config import get_settings
@@ -461,6 +462,7 @@ def get_document(run_id: int):
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
+    mode: Literal["auto", "edit"] = "auto"
 
 
 class ChatResponseModel(BaseModel):
@@ -494,20 +496,25 @@ def chat_with_document(
     # so it is not part of this window.
     history = get_chat_messages(user["id"], repo_id, limit=CHAT_MEMORY_MESSAGES)
 
-    # Cache hit: exact same question in the same conversational context.
+    # Cache hit: exact same question in the same conversational context. Forced
+    # edits bypass the cache entirely — they are not repeatable questions, and a
+    # failed edit must never be replayed to the next user as an answer.
     now = time.time()
     history_key = tuple((m["role"], m["content"][:200]) for m in history)
     cache_key = (run_id, req.message, document, history_key)
-    cached = _chat_cache.get(cache_key)
-    if cached and now - cached[0] < _CHAT_CACHE_TTL_SECONDS:
-        logger.info("Chat cache hit for run %s: '%s'", run_id, req.message[:80])
-        return cached[1]
+    if req.mode == "auto":
+        cached = _chat_cache.get(cache_key)
+        if cached and now - cached[0] < _CHAT_CACHE_TTL_SECONDS:
+            logger.info("Chat cache hit for run %s: '%s'", run_id, req.message[:80])
+            return cached[1]
 
     # Wire the chat into the retrieval pipeline: vector search -> graph
     # expansion -> rerank. Gives the agent the same grounded source context
-    # the generator uses, so answers can cite [ref:NODE_KEY] chunks.
+    # the generator uses, so answers can cite [ref:NODE_KEY] chunks. Forced
+    # edits are assumed stylistic, so they skip retrieval to save the vector
+    # search + rerank cost; flip this to include edits if they need source.
     source_context = ""
-    if repo_id and commit_sha:
+    if req.mode == "auto" and repo_id and commit_sha:
         try:
             from retrieval import retriever
 
@@ -525,6 +532,7 @@ def chat_with_document(
         document=document,
         history=history,
         source_context=source_context,
+        mode=req.mode,
     )
 
     # Persist the conversation in the workspace thread (user + repo), shared
@@ -545,9 +553,9 @@ def chat_with_document(
                 (result.document, run_id),
             )
 
-    # Only cache non-edit replies — an edit changes the document, so the cache
-    # key already covers staleness and the edited doc is persisted above.
-    if not result.edited:
+    # Only cache auto-mode, non-edit replies — forced edits and edits that
+    # change the document are never answers worth replaying.
+    if req.mode == "auto" and not result.edited:
         _chat_cache[cache_key] = (now, response)
         if len(_chat_cache) > _CHAT_CACHE_MAX:
             oldest = min(_chat_cache, key=lambda k: _chat_cache[k][0])
