@@ -48,7 +48,8 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
-  // One-shot edit mode: the next message is sent as a forced edit, then resets.
+  // Edit mode shows a separate canvas; the conversation stays mounted so
+  // flipping back to Q&A reveals the previous messages.
   const [editMode, setEditMode] = useState(false);
   // Index of the assistant message currently being typed out (null = show full).
   const [typingIndex, setTypingIndex] = useState<number | null>(null);
@@ -146,7 +147,6 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
 
     const forceEdit = editMode;
     setInput("");
-    setEditMode(false);
     setHistoryIndex(null);
     draftRef.current = "";
     historyRef.current = [...historyRef.current, text];
@@ -208,9 +208,6 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
           </h3>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
-            Run #{runId}
-          </span>
           <button
             type="button"
             onClick={() => setEditMode((v) => !v)}
@@ -218,8 +215,8 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
             aria-pressed={editMode}
             title={
               editMode
-                ? "Edit mode on — your next message changes the document"
-                : "Turn on edit mode to change the document directly"
+                ? "Back to the question & answer conversation"
+                : "Open the editing canvas"
             }
             className={`text-[10px] font-mono px-2 py-0.5 rounded border transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               editMode
@@ -227,7 +224,7 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
                 : "bg-slate-800 text-slate-400 border-slate-700 hover:text-sky-300 hover:border-sky-400/50"
             }`}
           >
-            {editMode ? "Editing" : "Edit"}
+            {editMode ? "Q&A" : "Edit"}
           </button>
           <button
             type="button"
@@ -252,7 +249,34 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
           </div>
         )}
 
-        {!historyLoading && messages.length === 0 && (
+        {!historyLoading && editMode && (
+          <div className="h-full flex flex-col items-center justify-center text-center py-10 px-4">
+            <div className="w-10 h-10 rounded-full bg-sky-50 text-sky-600 flex items-center justify-center mx-auto mb-3 border border-sky-100">
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"
+                />
+              </svg>
+            </div>
+            <p className="text-xs font-semibold text-slate-700 mb-1">
+              Editing canvas
+            </p>
+            <p className="text-xs text-slate-400 leading-relaxed max-w-[230px]">
+              Describe what you want to change below. The document updates as
+              soon as you send. Click Q&amp;A to return to your conversation.
+            </p>
+          </div>
+        )}
+
+        {!historyLoading && !editMode && messages.length === 0 && (
           <div className="text-center py-8 px-4">
             <div className="w-10 h-10 rounded-full bg-sky-50 text-sky-600 flex items-center justify-center mx-auto mb-3 border border-sky-100">
               <svg
@@ -279,7 +303,7 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
           </div>
         )}
 
-        {messages.map((msg, i) => {
+        {!editMode && messages.map((msg, i) => {
           const animating = msg.role === "assistant" && i === typingIndex && msg.content.length > 0;
           return (
             <div
@@ -330,7 +354,9 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
           <div className="flex justify-start animate-slide-down">
             <div className="bg-white border border-slate-200 px-4 py-2.5 rounded-2xl text-xs text-slate-500 flex items-center gap-2 shadow-sm rounded-bl-xs">
               <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
-              <span>Analyzing & drafting response...</span>
+              <span>
+                {editMode ? "Applying edit..." : "Analyzing & drafting response..."}
+              </span>
             </div>
           </div>
         )}
@@ -339,11 +365,6 @@ export default function ChatPanel({ runId, onDocumentUpdate }: Props) {
 
       {/* Chat Input Field */}
       <div className="p-3 bg-white border-t border-slate-200/80">
-        {editMode && (
-          <p className="mb-2 text-[10px] text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-2 py-1">
-            Edit mode: your next message will modify the document.
-          </p>
-        )}
         <form
           onSubmit={(e) => {
             e.preventDefault();

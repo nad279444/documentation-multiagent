@@ -44,7 +44,12 @@ EDIT_SYSTEM = (
     "You revise technical documentation. Apply the requested change and return the FULL "
     "updated markdown document. Keep every unmodified section exactly the same, preserve "
     "headings and [ref:NODE_KEY] citations, and output only the document — no preamble, "
-    "no explanation, no code fences."
+    "no explanation, no code fences. "
+    "Markdown has no native colour, so stylistic requests use inline HTML: preserve existing "
+    "tags and emit safe presentational HTML such as "
+    '<span style="color: green;">text</span> when a colour, highlight, weight, or style is '
+    "requested. Never strip a style the user asked for, and never add scripts, event "
+    "handlers, or external resources."
 )
 
 

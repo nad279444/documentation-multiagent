@@ -2,8 +2,62 @@ import { Children, isValidElement, useEffect, useMemo, useRef, useState } from "
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import mermaid from "mermaid";
 import { stripCitations } from "../lib/text";
+
+interface HastNode {
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
+}
+
+// Raw HTML from the LLM/user is untrusted. Only keep presentational style
+// declarations so documents can be coloured or emphasised, never anything that
+// can move content, load remote assets, or run script.
+const ALLOWED_STYLE_PROPS = new Set([
+  "color",
+  "background-color",
+  "font-weight",
+  "font-style",
+  "text-decoration",
+]);
+
+function stripUnsafeStyles() {
+  return (tree: HastNode) => {
+    const walk = (node: HastNode) => {
+      const style = node.properties?.style;
+      if (typeof style === "string") {
+        const safe = style
+          .split(";")
+          .map((decl) => decl.trim())
+          .filter((decl) => {
+            const [prop, ...rest] = decl.split(":");
+            const value = rest.join(":").trim().toLowerCase();
+            if (!prop || !value) return false;
+            if (!ALLOWED_STYLE_PROPS.has(prop.trim().toLowerCase())) return false;
+            if (/url\s*\(|expression\s*\(|javascript:|@import/.test(value)) {
+              return false;
+            }
+            return true;
+          })
+          .join("; ");
+        if (safe) node.properties!.style = safe;
+        else delete node.properties!.style;
+      }
+      node.children?.forEach(walk);
+    };
+    walk(tree);
+  };
+}
+
+const SANITIZE_SCHEMA = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    "*": ["style", ...(defaultSchema.attributes?.["*"] ?? [])],
+  },
+};
 
 interface MermaidBlockProps {
   code: string;
@@ -388,6 +442,11 @@ export default function DocumentViewer({
           >
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
+              rehypePlugins={[
+                rehypeRaw,
+                stripUnsafeStyles,
+                [rehypeSanitize, SANITIZE_SCHEMA],
+              ]}
               components={{
                 pre({ children, ...props }) {
                   const mermaidCode = getMermaidCodeFromPre(children);
